@@ -29,7 +29,7 @@ Bei langen Jobs oder Abbruch: `submit` → `wait <id>` → `download <id>`; dies
 - **Vor jeder kostenpflichtigen Generierung** Modell + geschätzten Preis nennen und Bestätigung abwarten. Bei Serien die Gesamtsumme nennen.
 - `.env` nie lesen oder ausgeben; Zugangsdaten lädt `hf.py` selbst.
 - `--verbose` / `-v` nur zur Fehlersuche, nicht für normale Ausgaben.
-- Vor Bild-zu-Video sicherstellen, dass `--image-url` eine **nicht leere, öffentliche HTTPS-URL** ist.
+- Vor Bild-zu-Video sicherstellen, dass `--image-url` nicht leer ist (öffentliche HTTPS-URL oder existierende lokale Datei).
 - Fehlt ein Modell im Katalog oder ist er älter als ~2 Wochen: `hf.py catalog update` und danach `hf.py prices` (beides kostenlos).
 
 ## Getestete Modelle (Stand 2026-10-30)
@@ -37,10 +37,13 @@ Bei langen Jobs oder Abbruch: `submit` → `wait <id>` → `download <id>`; dies
 | Modell | Zweck | Preis | Ergebnis |
 |---|---|---|---|
 | `higgsfield-ai/soul/v2/standard` | Text→Bild, Standard-Wahl | 0,004 $ (720p) | PNG 1696×960 bei 16:9, ~18 s |
-| `kling-video/v2.5-turbo/standard/image-to-video` | Bild→Video, günstig | 0,179 $ (5 s), 0,357 $ (10 s) | MP4 1276×720, 24 fps, ~60 s |
+| `kling-video/v2.5-turbo/standard/image-to-video` | Bild→Video, günstig | 0,179 $ (5 s), 0,357 $ (10 s) | MP4 1276×720, 24 fps, ~60 s, ohne Ton |
+| `kling-video/v4.0/image-to-video` | Bild→Video, neuer, **mit Ton** | ~0,134 $/s (720p), ~0,20 $/s (1080p) | MP4 1296×732, 24 fps + AAC-Ton, ~3,5 min für 3 s |
 
 Weitere Werte: SOUL `resolution` nur `720p`/`1080p`, `aspect_ratio` nur `9:16, 16:9, 4:3, 3:4, 1:1, 2:3, 3:2`.
 Kling 2.5 Turbo: `duration` 5 oder 10, kein `aspect_ratio` (übernimmt das Format des Bildes).
+Kling 4.0 (undokumentiert): `duration` 3–30, `resolution` 720p/**1080p (Default!)**, optional `end_image_url`.
+Ohne Angaben kostet es 2 $ (10 s, 1080p) – Dauer und Auflösung immer explizit setzen. Unbekannte Parameter ignoriert die API still.
 
 ## Bild → Video verketten
 
@@ -50,7 +53,12 @@ Kling 2.5 Turbo: `duration` 5 oder 10, kein `aspect_ratio` (übernimmt das Forma
 .venv/bin/python hf.py run kling-video/v2.5-turbo/standard/image-to-video --prompt "<Bewegung>" --image-url "<urls[0]>"
 ```
 
-Ergebnis-URLs gelten 7 Tage. Lokale Dateien hochladen kann das CLI noch nicht.
+Ergebnis-URLs gelten 7 Tage.
+
+**Lokale Dateien:** `--image-url` akzeptiert auch einen Pfad (`./foto.jpg`, `~/Bilder/x.png`) – das CLI lädt die
+Datei automatisch hoch (jpg, png, webp, gif). Nur die URL holen: `hf.py upload <datei>`.
+
+**Abbrechen:** `hf.py cancel <request_id>` – nur solange der Job `queued` ist; ein abgebrochener Job wird erstattet.
 
 ## Prompt-Muster (kurz)
 

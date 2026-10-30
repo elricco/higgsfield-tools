@@ -11,6 +11,8 @@ Nur bei Bedarf lesen. Kurzfassung steht in [SKILL.md](SKILL.md).
 | `estimate <model_id> --prompt ... [--image-url] [--param k=v]` | `{"model", "usd"}` oder zusätzlich `"pricing"` (Text bei Token-Abrechnung) |
 | `submit <model_id> --prompt ... [...]` | `{"request_id", "status"}` |
 | `status <request_id> [--urls]` | `{"request_id", "status", ["error"], ["urls"]}` |
+| `cancel <request_id>` | `{"request_id", "status": "canceled"}`; Fehler, wenn der Job schon läuft |
+| `upload <datei>` | `{"file", "url"}` – öffentliche URL der hochgeladenen Datei |
 | `wait <request_id> [--timeout 600]` | Endstatus; Polling 2 s → 10 s |
 | `download <request_id> [--out outputs]` | `{"request_id", "status", "files": [...]}` |
 | `run <model_id> --prompt ... [--timeout] [--out]` | wie `download` |
@@ -41,7 +43,8 @@ Preise in `prices.json` gelten für Platzhalter-Eingaben mit Default-Parametern.
 - Status: `queued` → `in_progress` → `completed` | `failed` | `nsfw` | `canceled`. `failed`/`nsfw` werden nicht berechnet.
 - Ausgabe: Bilder `images: [{url}]`, Videos `video: {url}`, Audio `audio`/`audios`. Dateien 7 Tage abrufbar (`expires_at`).
 - `submit` sendet einen `Idempotency-Key`; Retries erzeugen keine Doppel-Jobs.
-- Abbruch nur solange `queued`: `POST /requests/<id>/cancel` (noch kein CLI-Befehl).
+- Abbruch nur solange `queued`: `POST /requests/<id>/cancel` (`hf.py cancel`), sonst `400`.
+- Upload: `POST /files/generate-upload-url {"content_type"}` → `PUT` an `upload_url` mit `upload_headers`, ohne Zugangsdaten → `public_url` (CloudFront). Typen: jpeg, png, webp, gif, wav, mp4.
 - Token-abgerechnete Modelle (z. B. Seedance 2.5, Kling 4.0 reference/video-edit) liefern bei `estimate` keinen Betrag, sondern eine Preisbeschreibung pro Sekunde/Auflösung.
 - In der Doku fehlen teils Pflichtfelder in `required`; die API nennt sie im 400-Fehler.
 
@@ -62,5 +65,5 @@ Allgemeine Erfahrungswerte, nur das Kling-Beispiel ist hier getestet.
 
 **Konsistenz über mehrere Clips**
 - Gleiche Stil-Formulierung in allen Prompts wiederverwenden.
-- Clip N+1 vom letzten Frame von Clip N starten (Frame lokal extrahieren → Upload nötig, noch nicht im CLI) oder vom selben Startbild.
+- Clip N+1 vom letzten Frame von Clip N starten (`ffmpeg -sseof -0.1 -i clip.mp4 -frames:v 1 last.png`, dann `--image-url last.png`) oder vom selben Startbild.
 - Modelle mit `first-last-frame` oder `reference-to-video` nutzen, wenn Anfang und Ende feststehen.

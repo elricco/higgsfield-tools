@@ -56,5 +56,25 @@
       "10s": "0.357"
     },
     "notes": "Getestet 2026-10-30: 5 s ergibt MP4 H.264 1276x720, 24 fps (~7.9 MB), run komplett ~60 s. duration: 5 oder 10; optional negative_prompt, cfg_scale (0-1). image_url ist Pflicht."
+  },
+  "kling-video/v4.0/image-to-video": {
+    "type": "image-to-video",
+    "output": "video",
+    "defaults": {
+      "duration": 5,
+      "resolution": "720p"
+    },
+    "required": [
+      "prompt",
+      "image_url"
+    ],
+    "tested": true,
+    "estimate_usd": {
+      "3s 720p": "0.401",
+      "3s 1080p": "0.600",
+      "5s 1080p": "0.999",
+      "10s 1080p": "1.998"
+    },
+    "notes": "Getestet 2026-10-30 (nicht dokumentiert, Parameter per estimate ermittelt): duration 3-30 (ganze Sekunden), resolution 720p/1080p (Default 1080p!), optional end_image_url. Unbekannte Felder werden still ignoriert. 3 s 720p -> MP4 1296x732, 24 fps, MIT Tonspur (AAC, Umgebungsgeräusche), Dauer ~3,5 min."
   }
 }
