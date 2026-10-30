@@ -66,6 +66,15 @@ def sleeps(monkeypatch):
 
 
 @pytest.fixture
+def characters_file(tmp_path, monkeypatch):
+    """Eine characters.json mit einem trainierten Charakter."""
+    path = tmp_path / "characters.json"
+    path.write_text(json.dumps({"Mila": {"id": "ref-123", "model_version": "v2", "status": "completed"}}))
+    monkeypatch.setattr(hf, "CHARACTERS_FILE", path)
+    return path
+
+
+@pytest.fixture
 def models_file(tmp_path, monkeypatch):
     """Eine kleine models.json im temporären Ordner statt der echten."""
     path = tmp_path / "models.json"
@@ -97,11 +106,17 @@ def test_parse_param_without_equals_sign():
         hf.parse_param("duration")
 
 
+def generation_args(**overrides) -> argparse.Namespace:
+    """Argumente wie von 'submit'/'run'; einzelne Felder lassen sich überschreiben."""
+    values = {"model_id": "test/image", "prompt": "p", "image_url": None,
+              "image_urls": None, "character": None, "param": []}
+    values.update(overrides)
+    return argparse.Namespace(**values)
+
+
 def test_build_payload_order(models_file):
-    args = argparse.Namespace(
-        model_id="test/image", prompt="ein See", image_url="https://x/a.jpg",
-        param=["resolution=1080p", "seed=7"],
-    )
+    args = generation_args(prompt="ein See", image_url="https://x/a.jpg",
+                           param=["resolution=1080p", "seed=7"])
     assert hf.build_payload(args) == {
         "aspect_ratio": "4:3",          # aus models.json
         "resolution": "1080p",          # --param überschreibt den Default
@@ -112,8 +127,23 @@ def test_build_payload_order(models_file):
 
 
 def test_build_payload_unknown_model_has_no_defaults(models_file):
-    args = argparse.Namespace(model_id="other/model", prompt="p", image_url=None, param=[])
-    assert hf.build_payload(args) == {"prompt": "p"}
+    assert hf.build_payload(generation_args(model_id="other/model")) == {"prompt": "p"}
+
+
+def test_build_payload_image_urls_keeps_order(models_file):
+    args = generation_args(model_id="other/model", image_urls=["https://x/1.jpg", "https://x/2.jpg"])
+    assert hf.build_payload(args)["image_urls"] == ["https://x/1.jpg", "https://x/2.jpg"]
+
+
+def test_build_payload_character(models_file, characters_file):
+    payload = hf.build_payload(generation_args(model_id="other/model", character="mila"))
+    assert payload["custom_reference_id"] == "ref-123"
+    assert payload["custom_reference_strength"] == 1.0
+
+
+def test_build_payload_character_strength_can_be_overridden(models_file, characters_file):
+    args = generation_args(model_id="other/model", character="Mila", param=["custom_reference_strength=0.6"])
+    assert hf.build_payload(args)["custom_reference_strength"] == 0.6
 
 
 # --- Konfiguration ----------------------------------------------------------
@@ -288,9 +318,7 @@ def test_api_request_empty_body(sleeps):
 def test_submit_sends_idempotency_key_and_remembers_model(sleeps, models_file, tmp_path, monkeypatch):
     monkeypatch.setattr(hf, "HISTORY_FILE", tmp_path / "history.json")
     session = FakeSession([FakeResponse(200, {"request_id": "r42", "status": "queued"})])
-    args = argparse.Namespace(model_id="test/image", prompt="p", image_url=None, param=[])
-
-    hf.submit_generation(session, args)
+    hf.submit_generation(session, generation_args())
 
     call = session.calls[0]
     assert call["url"] == "https://api.higgsfield.ai/test/image"
@@ -393,6 +421,50 @@ def test_cancel_running_job(no_env_file, monkeypatch, capsys):
     monkeypatch.setattr(hf, "make_session", lambda: FakeSession([FakeResponse(400, {"detail": "started"})]))
     assert hf.main(["cancel", "r1"]) == 1
     assert "läuft bereits" in json.loads(capsys.readouterr().out)["error"]
+
+
+# --- Charaktere -------------------------------------------------------------
+
+
+def test_find_character_by_name_or_id(characters_file):
+    assert hf.find_character("MILA")["id"] == "ref-123"
+    assert hf.find_character("ref-123")["name"] == "Mila"
+    with pytest.raises(hf.CliError, match="unbekannt"):
+        hf.find_character("Otto")
+
+
+def test_character_payload():
+    assert hf.character_payload("Mila", "v2", ["https://x/1.jpg"]) == {
+        "name": "Mila",
+        "model_version": "v2",
+        "input_images": [{"type": "image_url", "image_url": "https://x/1.jpg"}],
+    }
+
+
+def test_character_create_saves_id(tmp_path, monkeypatch, no_env_file, capsys):
+    monkeypatch.setattr(hf, "CHARACTERS_FILE", tmp_path / "characters.json")
+    session = FakeSession([FakeResponse(200, {"id": "ref-9", "status": "queued"})])
+    monkeypatch.setattr(hf, "make_session", lambda: session)
+
+    assert hf.main(["character", "create", "Otto", "https://x/1.jpg", "https://x/2.jpg"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"name": "Otto", "id": "ref-9", "status": "queued"}
+    assert session.calls[0]["url"].endswith("/v1/custom-references")
+    assert len(session.calls[0]["json"]["input_images"]) == 2
+    assert hf.load_characters()["Otto"]["id"] == "ref-9"
+
+
+def test_character_create_rejects_duplicate_name(characters_file, no_env_file, capsys):
+    assert hf.main(["character", "create", "mila", "https://x/1.jpg"]) == 1
+    assert "schon" in json.loads(capsys.readouterr().out)["error"]
+
+
+def test_character_status_updates_file(characters_file, no_env_file, monkeypatch, capsys):
+    monkeypatch.setattr(hf, "make_session", lambda: FakeSession([
+        FakeResponse(200, {"id": "ref-123", "status": "in_progress"}),
+    ]))
+    assert hf.main(["character", "status", "Mila"]) == 0
+    assert json.loads(capsys.readouterr().out)["status"] == "in_progress"
+    assert hf.load_characters()["Mila"]["status"] == "in_progress"
 
 
 # --- main: Ausgabe und Exit-Codes -------------------------------------------

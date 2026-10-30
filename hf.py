@@ -39,6 +39,8 @@ MODELS_FILE = PROJECT_DIR / "models.json"
 # Automatisch erzeugt mit 'hf catalog update' bzw. 'hf prices'.
 CATALOG_FILE = PROJECT_DIR / "catalog.json"
 PRICES_FILE = PROJECT_DIR / "prices.json"
+# Trainierte Soul-ID-Charaktere: Name -> ID (die API kann sie nicht auflisten).
+CHARACTERS_FILE = PROJECT_DIR / "characters.json"
 ENV_FILE = PROJECT_DIR / ".env"
 # Merkt sich, welches Modell zu welcher request_id gehört (für Dateinamen).
 HISTORY_FILE = PROJECT_DIR / ".hf-history.json"
@@ -190,6 +192,12 @@ def build_payload(args: argparse.Namespace) -> dict:
     payload["prompt"] = args.prompt
     if args.image_url:
         payload["image_url"] = resolve_input_url(args.image_url)
+    if args.image_urls:
+        # Eine "list comprehension": wendet resolve_input_url auf jedes Element an.
+        payload["image_urls"] = [resolve_input_url(value) for value in args.image_urls]
+    if args.character:
+        payload["custom_reference_id"] = find_character(args.character)["id"]
+        payload.setdefault("custom_reference_strength", 1.0)
     for text in args.param:
         key, value = parse_param(text)
         payload[key] = value
@@ -354,6 +362,77 @@ def resolve_input_url(value: str, session: requests.Session | None = None) -> st
         return value
     # expanduser() macht aus "~/Bilder/x.jpg" einen vollständigen Pfad.
     return upload_file(session or make_session(), Path(value).expanduser())
+
+
+# --- Charaktere (Soul ID) ---------------------------------------------------
+
+
+def load_characters() -> dict:
+    return read_json_file(CHARACTERS_FILE, {})
+
+
+def find_character(name_or_id: str) -> dict:
+    """Sucht einen Charakter über seinen Namen (ohne Groß/Klein) oder seine ID."""
+    for name, character in load_characters().items():
+        if name.lower() == name_or_id.lower() or character["id"] == name_or_id:
+            return {"name": name, **character}
+    raise CliError(f"Charakter '{name_or_id}' unbekannt. Siehe 'hf character list'.")
+
+
+def save_character(name: str, data: dict) -> None:
+    characters = load_characters()
+    # Vorhandene Felder behalten, neue darüberschreiben.
+    characters[name] = {**characters.get(name, {}), **data}
+    write_json_file(CHARACTERS_FILE, characters)
+
+
+def character_payload(name: str, model_version: str, image_urls: list[str]) -> dict:
+    """Body für POST /v1/custom-references laut Doku."""
+    return {
+        "name": name,
+        "model_version": model_version,
+        "input_images": [{"type": "image_url", "image_url": url} for url in image_urls],
+    }
+
+
+def cmd_character_create(args: argparse.Namespace) -> dict:
+    if not 1 <= len(args.images) <= 100:
+        raise CliError("Soul ID braucht 1 bis 100 Bilder.")
+    if args.name.lower() in (name.lower() for name in load_characters()):
+        raise CliError(f"Es gibt schon einen Charakter '{args.name}'.")
+    session = make_session()
+    urls = [resolve_input_url(value, session) for value in args.images]
+    result = api_request(session, "POST", "/v1/custom-references",
+                         json_body=character_payload(args.name, args.model_version, urls))
+    save_character(args.name, {
+        "id": result["id"],
+        "model_version": args.model_version,
+        "status": result.get("status"),
+        "created": date.today().isoformat(),
+        "images": [str(value) for value in args.images],
+    })
+    return {"name": args.name, "id": result["id"], "status": result.get("status")}
+
+
+def cmd_character_status(args: argparse.Namespace) -> dict:
+    character = find_character(args.name)
+    result = api_request(make_session(), "GET", f"/v1/custom-references/{character['id']}")
+    save_character(character["name"], {"status": result.get("status")})
+    output = {"name": character["name"], "id": character["id"], "status": result.get("status")}
+    if result.get("status") == "failed":
+        output["error"] = result.get("error") or "Training fehlgeschlagen."
+    if args.verbose:
+        output["response"] = result
+    return output
+
+
+def cmd_character_list(args: argparse.Namespace) -> dict:
+    return {
+        "characters": [
+            {"name": name, "id": c["id"], "model_version": c.get("model_version"), "status": c.get("status")}
+            for name, c in load_characters().items()
+        ]
+    }
 
 
 # --- Ergebnisse -------------------------------------------------------------
@@ -685,6 +764,9 @@ def build_parser() -> argparse.ArgumentParser:
     generation.add_argument("model_id", help="z. B. higgsfield-ai/soul/standard")
     generation.add_argument("--prompt", required=True)
     generation.add_argument("--image-url", help="Eingabebild: URL oder lokale Datei (wird hochgeladen)")
+    generation.add_argument("--image-urls", nargs="+", metavar="BILD",
+                            help="mehrere Eingabebilder (für Edit-Modelle), URLs oder lokale Dateien")
+    generation.add_argument("--character", help="trainierter Soul-ID-Charakter (Name oder ID)")
     generation.add_argument(
         "--param", action="append", default=[], metavar="KEY=VALUE",
         help="weiterer Modellparameter, mehrfach erlaubt",
@@ -742,6 +824,20 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("prices", parents=[common, filters], help="Preise per estimate abfragen (kostenlos)")
     p.set_defaults(func=cmd_prices)
+
+    p = sub.add_parser("character", parents=[common], help="Soul-ID-Charaktere trainieren und verwalten")
+    character_sub = p.add_subparsers(dest="character_command", required=True)
+    p = character_sub.add_parser("create", parents=[common], help="Charakter aus Bildern trainieren (kostet!)")
+    p.add_argument("name")
+    p.add_argument("images", nargs="+", help="Bild-URLs oder lokale Dateien (1-100)")
+    p.add_argument("--model-version", choices=["v1", "v2", "cinema"], default="v2",
+                   help="SOUL-Familie, mit der der Charakter genutzt wird (Standard: v2)")
+    p.set_defaults(func=cmd_character_create)
+    p = character_sub.add_parser("status", parents=[common], help="Trainingsstatus abfragen")
+    p.add_argument("name", help="Name oder ID")
+    p.set_defaults(func=cmd_character_status)
+    p = character_sub.add_parser("list", parents=[common], help="lokal bekannte Charaktere")
+    p.set_defaults(func=cmd_character_list)
 
     p = sub.add_parser("catalog", parents=[common], help="Modellkatalog verwalten")
     catalog_sub = p.add_subparsers(dest="catalog_command", required=True)

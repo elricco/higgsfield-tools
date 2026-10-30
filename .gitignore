@@ -14,3 +14,6 @@ __pycache__/
 
 # Lokale Zuordnung request_id -> Modell
 .hf-history.json
+
+# Trainierte Charaktere (kontospezifische IDs)
+characters.json
