@@ -74,6 +74,10 @@ hf run higgsfield-ai/soul/v2/standard --character Mila --prompt "..."
 
 # Was hat heute gekostet?
 hf spend --days 1
+
+# Alle Ergebnisse im Browser (Suche, Filter nach Modell, Bilder/Videos)
+hf gallery
+hf gallery --scan ~/irgendein/ordner   # ältere Ergebnisdateien vorher ins Logbuch aufnehmen
 ```
 
 Neben jeder heruntergeladenen Datei liegt eine `.json` mit Prompt, Parametern, Modell und geschätzten Kosten.
@@ -93,6 +97,7 @@ Neben jeder heruntergeladenen Datei liegt eine `.json` mit Prompt, Parametern, M
 | `download <request_id> [--out outputs]` | Dateien speichern |
 | `run <model> --prompt ... [--max-usd USD]` | submit + wait + download |
 | `spend [--days N]` | geschätzte Kosten aus dem Job-Logbuch, je Modell |
+| `gallery [--scan ORDNER] [--no-open]` | HTML-Übersicht aller Ergebnisse, öffnet im Browser |
 | `cancel <request_id>` | Job abbrechen, solange er `queued` ist |
 | `upload <datei>` | lokale Datei hochladen, gibt öffentliche URL aus |
 | `character create\|status\|list\|add` | Soul-ID-Charaktere trainieren und verwalten |
@@ -100,6 +105,8 @@ Neben jeder heruntergeladenen Datei liegt eine `.json` mit Prompt, Parametern, M
 
 Generierungen kennen außerdem `--image-urls A B ...` (Edit-Modelle; lokale Dateien werden hochgeladen) und
 `--character <Name>` (SOUL mit trainiertem Charakter).
+
+`run` und `download` bauen die Galerie nach jedem Download neu; mit `--open` wird sie auch geöffnet.
 
 `submit` und `run` fragen vorher den Preis ab (kostenlos) und speichern ihn. Mit `--max-usd` oder `HF_MAX_USD` in `.env`
 schicken sie keinen Job ab, dessen Schätzung höher oder unbekannt ist.
@@ -113,12 +120,14 @@ Exit-Codes: `0` ok, `1` Fehler bzw. Job fehlgeschlagen, `2` Zugangsdaten fehlen.
 | - | - |
 | `hf.py` | das CLI |
 | `catalog.py` | Katalog-Logik (Doku auslesen, zusammenführen, Platzhalter) |
+| `gallery.py` | baut die HTML-Galerie aus dem Job-Logbuch |
 | `pyproject.toml` | Paketbeschreibung, Abhängigkeiten, Befehl `hf` |
 | `setup.sh` | Einrichtung auf diesem Rechner |
 | `models.json` | eigene Notizen und Standardparameter getesteter Modelle (von Hand gepflegt) |
 | `catalog.json`, `prices.json` | erzeugt von `catalog update` bzw. `prices` |
 | `characters.json` | Charakter-Name → Soul-ID (lokal, nicht in Git) |
 | `.hf-history.json` | Job-Logbuch: Modell, Prompt, geschätzte Kosten, Status, Dateipfade (lokal, nicht in Git) |
+| `gallery.html` | erzeugte Übersicht aller Ergebnisse (lokal, nicht in Git) |
 | `.claude/skills/higgsfield/` | Skill für Claude Code |
 
 Die Datendateien liegen immer im Repo, egal aus welchem Ordner `hf` aufgerufen wird.

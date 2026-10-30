@@ -13,14 +13,16 @@ import sys
 import time
 import traceback
 import uuid
+import webbrowser
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlparse
 
 import requests
 
-# Our own module catalog.py (lives in the same folder).
+# Our own modules catalog.py and gallery.py (they live in the same folder).
 import catalog
+import gallery
 
 # --- Constants --------------------------------------------------------------
 
@@ -48,6 +50,8 @@ CHARACTERS_FILE = PROJECT_DIR / "characters.json"
 ENV_FILE = PROJECT_DIR / ".env"
 # Job log: model, prompt, estimated cost, status and files per request_id.
 HISTORY_FILE = PROJECT_DIR / ".hf-history.json"
+# HTML overview of all results, rebuilt after every download.
+GALLERY_FILE = PROJECT_DIR / "gallery.html"
 
 # Maximum number of seconds a single HTTP call may take.
 HTTP_TIMEOUT = 30
@@ -706,6 +710,7 @@ def cmd_download(args: argparse.Namespace) -> dict:
         return output
     job = load_history().get(args.request_id, {})
     files = save_outputs(result, job, args.out)
+    refresh_gallery(args.open)
     return {"request_id": args.request_id, "status": "completed", "files": files}
 
 
@@ -718,6 +723,7 @@ def cmd_run(args: argparse.Namespace) -> dict:
         return compact_status(result)
     job = load_history().get(result["request_id"], {})
     files = save_outputs(result, job, args.out)
+    refresh_gallery(args.open)
     return {"request_id": result["request_id"], "status": "completed", "files": files, "usd": submitted["usd"]}
 
 
@@ -755,6 +761,70 @@ def cmd_spend(args: argparse.Namespace) -> dict:
         "by_model": {model: round(usd, 3) for model, usd in sorted(by_model.items(), key=lambda item: -item[1])},
         **counts,
     }
+
+
+def gallery_items() -> tuple[list[dict], int]:
+    """Jobs from the log whose files still exist, newest first, plus the number of missing files."""
+    items = []
+    missing = 0
+    for request_id, job in load_history().items():
+        files = [path for path in job.get("files", []) if Path(path).is_file()]
+        missing += len(job.get("files", [])) - len(files)
+        if not files:
+            continue
+        # Old entries have no "submitted" – then the file's modification time has to do.
+        submitted = job.get("submitted") or datetime.fromtimestamp(Path(files[0]).stat().st_mtime).isoformat(timespec="seconds")
+        items.append({**job, "request_id": request_id, "files": files,
+                      "submitted": submitted, "date": submitted[:16].replace("T", " ")})
+    items.sort(key=lambda item: item["submitted"], reverse=True)
+    return items, missing
+
+
+def write_gallery() -> dict:
+    items, missing = gallery_items()
+    page = gallery.render_gallery(items, datetime.now().strftime("%Y-%m-%d %H:%M"))
+    GALLERY_FILE.write_text(page, encoding="utf-8")
+    return {"file": str(GALLERY_FILE), "jobs": len(items), "missing_files": missing}
+
+
+def refresh_gallery(open_browser: bool = False) -> None:
+    """Rebuilds the gallery after a download. A gallery problem must never fail the job itself."""
+    try:
+        write_gallery()
+    except OSError:
+        return
+    if open_browser:
+        webbrowser.open(GALLERY_FILE.as_uri())
+
+
+def scan_for_results(directory: Path) -> int:
+    """Adds result files in a folder to the job log, matched by the request_id in the file name.
+
+    Useful for files that were downloaded before the job log existed.
+    """
+    history = load_history()
+    added = 0
+    # rglob("*") walks through the folder and all subfolders.
+    for path in sorted(directory.expanduser().rglob("*")):
+        request_id = gallery.find_request_id(path.name)
+        if not path.is_file() or not gallery.media_kind(path.name) or request_id not in history:
+            continue
+        files = history[request_id].setdefault("files", [])
+        if str(path.resolve()) not in files:
+            files.append(str(path.resolve()))
+            added += 1
+    write_json_file(HISTORY_FILE, history)
+    return added
+
+
+def cmd_gallery(args: argparse.Namespace) -> dict:
+    added = scan_for_results(args.scan) if args.scan else None
+    output = write_gallery()
+    if added is not None:
+        output["added_files"] = added
+    if not args.no_open:
+        webbrowser.open(GALLERY_FILE.as_uri())
+    return output
 
 
 def filtered_models(args: argparse.Namespace) -> dict:
@@ -998,15 +1068,24 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--timeout", type=int, default=600, help="seconds (default: 600)")
     p.set_defaults(func=cmd_wait)
 
-    p = sub.add_parser("download", parents=[common], help="download the result files")
+    # For commands that download results (download, run).
+    results = argparse.ArgumentParser(add_help=False)
+    results.add_argument("--out", type=Path, default=Path("outputs"))
+    results.add_argument("--open", action="store_true", help="open the gallery in the browser afterwards")
+
+    p = sub.add_parser("download", parents=[common, results], help="download the result files")
     p.add_argument("request_id")
-    p.add_argument("--out", type=Path, default=Path("outputs"))
     p.set_defaults(func=cmd_download)
 
-    p = sub.add_parser("run", parents=[common, generation, budget], help="submit + wait + download")
+    p = sub.add_parser("run", parents=[common, generation, budget, results], help="submit + wait + download")
     p.add_argument("--timeout", type=int, default=600)
-    p.add_argument("--out", type=Path, default=Path("outputs"))
     p.set_defaults(func=cmd_run)
+
+    p = sub.add_parser("gallery", parents=[common], help="HTML overview of all results, opens in the browser")
+    p.add_argument("--scan", type=Path, metavar="FOLDER",
+                   help="first add older result files from this folder to the job log")
+    p.add_argument("--no-open", action="store_true", help="only write gallery.html, do not open it")
+    p.set_defaults(func=cmd_gallery)
 
     p = sub.add_parser("spend", parents=[common], help="estimated costs from the job log")
     p.add_argument("--days", type=int, help="only the last N days (1 = today)")

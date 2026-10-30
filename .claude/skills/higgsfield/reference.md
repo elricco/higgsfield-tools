@@ -16,6 +16,7 @@ Only read when needed. The short version is in [SKILL.md](SKILL.md).
 | `wait <request_id> [--timeout 600]` | final status; polling 2 s → 10 s |
 | `download <request_id> [--out outputs]` | `{"request_id", "status", "files": [...]}` |
 | `run <model_id> --prompt ... [--max-usd USD] [--timeout] [--out]` | like `download` plus `"usd"` |
+| `gallery [--scan FOLDER] [--no-open]` | `{"file", "jobs", "missing_files", ["added_files"]}`; writes `gallery.html` and opens it |
 | `spend [--days N]` | `{"since", "estimated_usd", "by_model", "jobs", "running", "not_charged", "price_unknown", "untracked"}` |
 | `catalog update [--docs-file PATH]` | builds `catalog.json` from `GET /models` + docs |
 | `prices [filters like models]` | writes `prices.json`, output only counters |
@@ -46,6 +47,7 @@ regardless of the current directory.
 | `prices.json` | price per model with date and the placeholder body used | `prices` |
 | `models.json` | own test notes + default parameters of tested models | by hand |
 | `./outputs/` (current directory) | downloads: `<date>_<model>_<request_id>[_n].<extension>` plus a `.json` sidecar each (prompt, payload, usd) | automatic |
+| `gallery.html` | overview of all results with filters; rebuilt after every `run`/`download` | automatic |
 | `.hf-history.json` | job log: request_id → model, prompt, payload, usd, status, absolute file paths | automatic |
 
 Prices in `prices.json` apply to placeholder inputs with default parameters. For real jobs always run `estimate` with the actual parameters.

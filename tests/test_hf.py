@@ -65,7 +65,16 @@ def history_file(tmp_path, monkeypatch):
     """
     path = tmp_path / "history.json"
     monkeypatch.setattr(hf, "HISTORY_FILE", path)
+    monkeypatch.setattr(hf, "GALLERY_FILE", tmp_path / "gallery.html")
     return path
+
+
+@pytest.fixture(autouse=True)
+def browser_calls(monkeypatch):
+    """Runs automatically: no test opens a real browser; the URLs are recorded instead."""
+    calls = []
+    monkeypatch.setattr(hf.webbrowser, "open", lambda url: calls.append(url))
+    return calls
 
 
 @pytest.fixture
@@ -742,3 +751,63 @@ def test_main_failed_job_returns_exit_code_1(no_env_file, monkeypatch, capsys):
     ]))
     assert hf.main(["status", "r1"]) == 1
     assert json.loads(capsys.readouterr().out)["status"] == "nsfw"
+
+
+# --- Gallery ----------------------------------------------------------------
+
+
+def test_gallery_items_skip_missing_files_and_sort_newest_first(history_file, tmp_path):
+    old_image = tmp_path / "old.png"
+    old_image.write_bytes(b"x")
+    new_image = tmp_path / "new.png"
+    new_image.write_bytes(b"x")
+    history_file.write_text(json.dumps({
+        "r1": {"model": "a/b", "submitted": "2026-10-29T10:00:00", "files": [str(old_image)]},
+        "r2": {"model": "a/b", "submitted": "2026-10-30T10:00:00", "files": [str(new_image), "/gone.png"]},
+        "r3": {"model": "a/b", "files": ["/gone-too.png"]},
+    }))
+    items, missing = hf.gallery_items()
+    assert [entry["request_id"] for entry in items] == ["r2", "r1"]
+    assert items[0]["files"] == [str(new_image)]
+    assert items[0]["date"] == "2026-10-30 10:00"
+    assert missing == 2
+
+
+def test_scan_adds_old_result_files(history_file, tmp_path):
+    folder = tmp_path / "outputs" / "character"
+    folder.mkdir(parents=True)
+    image = folder / "2026-10-30_a-b_01a18e46-23d4-7f70-b7d6-5e34755ccbc4_1.png"
+    image.write_bytes(b"x")
+    (folder / "2026-10-30_a-b_01a18e46-23d4-7f70-b7d6-5e34755ccbc4_1.json").write_text("{}")
+    (folder / "unrelated.png").write_bytes(b"x")
+    history_file.write_text(json.dumps({"01a18e46-23d4-7f70-b7d6-5e34755ccbc4": "a/b"}))
+
+    assert hf.scan_for_results(tmp_path / "outputs") == 1
+    # A second scan finds nothing new.
+    assert hf.scan_for_results(tmp_path / "outputs") == 0
+    assert hf.load_history()["01a18e46-23d4-7f70-b7d6-5e34755ccbc4"]["files"] == [str(image.resolve())]
+
+
+def test_gallery_command_writes_and_opens_page(history_file, no_env_file, tmp_path, capsys, browser_calls):
+    assert hf.main(["gallery"]) == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["jobs"] == 0
+    assert (tmp_path / "gallery.html").exists()
+    assert browser_calls == [(tmp_path / "gallery.html").as_uri()]
+
+
+def test_gallery_no_open(history_file, no_env_file, capsys, browser_calls):
+    hf.main(["gallery", "--no-open"])
+    assert browser_calls == []
+
+
+def test_run_rebuilds_gallery(sleeps, models_file, no_env_file, no_max_usd, tmp_path, monkeypatch, capsys, browser_calls):
+    monkeypatch.setattr(hf, "download_file", lambda url, target: target.write_bytes(b"IMG"))
+    monkeypatch.setattr(hf, "make_session", lambda: FakeSession([
+        ESTIMATE_OK, SUBMIT_OK,
+        FakeResponse(200, {"request_id": "r42", "status": "completed", "images": [{"url": "https://cdn/x.png"}]}),
+    ]))
+    assert hf.main(["run", "test/image", "--prompt", "a lake", "--out", str(tmp_path / "out"), "--open"]) == 0
+    assert json.loads(capsys.readouterr().out)["usd"] == 0.25
+    assert "a lake" in (tmp_path / "gallery.html").read_text()
+    assert len(browser_calls) == 1

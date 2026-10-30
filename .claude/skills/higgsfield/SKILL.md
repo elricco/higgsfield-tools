@@ -25,6 +25,8 @@ For problems with credentials or the network, run `hf doctor` first.
    `--max-usd` estimates again and refuses to submit if the price is higher or unknown.
 5. **Report the result:** only the paths from `files` and the cost (`usd`). No raw JSON.
    Next to every file there is a `.json` sidecar with prompt, parameters and cost.
+   To show results to the user: `hf gallery` (opens an HTML overview of all results in the browser),
+   or add `--open` to `run`/`download`.
 
 For long jobs or after an interruption: `submit` → `wait <id>` → `download <id>`; the same `request_id` is not charged twice.
 

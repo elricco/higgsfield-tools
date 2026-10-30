@@ -17,5 +17,5 @@ dev = ["pytest>=8.0"]
 hf = "hf:main"
 
 [tool.setuptools]
-# No package folders, just two single modules in the project folder.
-py-modules = ["hf", "catalog"]
+# No package folders, just single modules in the project folder.
+py-modules = ["hf", "catalog", "gallery"]

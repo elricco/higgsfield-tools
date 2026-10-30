@@ -15,6 +15,9 @@ __pycache__/
 # Local mapping request_id -> model
 .hf-history.json
 
+# Generated overview of all results
+gallery.html
+
 # Trained characters (account-specific IDs)
 characters.json
 
