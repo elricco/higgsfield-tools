@@ -50,11 +50,11 @@
       "prompt",
       "image_url"
     ],
-    "tested": false,
+    "tested": true,
     "estimate_usd": {
       "5s": "0.179",
       "10s": "0.357"
     },
-    "notes": "duration: 5 oder 10; optional negative_prompt, cfg_scale (0-1)"
+    "notes": "Getestet 2026-10-30: 5 s ergibt MP4 H.264 1276x720, 24 fps (~7.9 MB), run komplett ~60 s. duration: 5 oder 10; optional negative_prompt, cfg_scale (0-1). image_url ist Pflicht."
   }
 }

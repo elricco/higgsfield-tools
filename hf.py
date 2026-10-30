@@ -195,10 +195,12 @@ def describe_error(response: requests.Response) -> str:
         # Validierungsfehler: Liste mit {"loc": [...], "msg": "..."}
         parts = []
         for item in detail:
-            location = ".".join(str(x) for x in item.get("loc", []) if x != "body")
-            parts.append(f"{location}: {item.get('msg')}" if location else str(item.get("msg")))
+            location = ".".join(str(x) for x in item.get("loc", []) if x not in ("body", ""))
+            message = str(item.get("msg", "")).lstrip(": ")
+            parts.append(f"{location}: {message}" if location else message)
         return "; ".join(parts)
-    return str(detail)
+    # Bei fehlenden Pflichtfeldern beginnt der Text mit ": " (leerer Feldpfad).
+    return str(detail).lstrip(": ")
 
 
 def api_request(
