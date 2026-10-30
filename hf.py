@@ -7,9 +7,14 @@ die Ausgabe leicht lesen kann. Mit --verbose gibt es mehr Details.
 import argparse
 import json
 import os
+import random
 import sys
+import time
 import traceback
+import uuid
 from pathlib import Path
+
+import requests
 
 # --- Konstanten -------------------------------------------------------------
 
@@ -20,7 +25,16 @@ TERMINAL_STATUSES = {"completed", "failed", "nsfw", "canceled"}
 
 # Path(__file__).parent ist der Ordner, in dem diese Datei liegt.
 # So findet das CLI models.json auch, wenn man es aus einem anderen Ordner aufruft.
-MODELS_FILE = Path(__file__).parent / "models.json"
+PROJECT_DIR = Path(__file__).parent
+MODELS_FILE = PROJECT_DIR / "models.json"
+ENV_FILE = PROJECT_DIR / ".env"
+
+# Sekunden, die ein einzelner HTTP-Aufruf höchstens dauern darf.
+HTTP_TIMEOUT = 30
+# Wie oft ein Aufruf bei vorübergehenden Fehlern insgesamt versucht wird.
+MAX_ATTEMPTS = 4
+# HTTP-Status-Codes, bei denen sich ein neuer Versuch lohnt.
+RETRY_STATUS_CODES = {429, 500, 502, 503, 504}
 
 
 # --- Fehler und Ausgabe -----------------------------------------------------
@@ -41,6 +55,26 @@ def print_json(data: dict) -> None:
 
 
 # --- Konfiguration ----------------------------------------------------------
+
+
+def load_dotenv(path: Path) -> None:
+    """Liest KEY=VALUE-Zeilen aus einer .env-Datei in die Umgebungsvariablen.
+
+    Bereits gesetzte Variablen werden nicht überschrieben, d. h. ein
+    'export HF_API_KEY=...' im Terminal hat Vorrang vor der Datei.
+    """
+    if not path.exists():
+        return
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        # Leerzeilen, Kommentare und Zeilen ohne '=' überspringen.
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        # split("=", 1) trennt nur am ersten '=' – das Secret darf selbst '=' enthalten.
+        name, value = line.split("=", 1)
+        name = name.strip().removeprefix("export ").strip()
+        value = value.strip().strip('"').strip("'")
+        os.environ.setdefault(name, value)
 
 
 def load_credentials() -> tuple[str, str]:
@@ -65,9 +99,134 @@ def load_models() -> dict:
         raise CliError(f"{MODELS_FILE.name} ist kein gültiges JSON: {error}")
 
 
+# --- Parameter --------------------------------------------------------------
+
+
+def parse_param(text: str) -> tuple[str, object]:
+    """Zerlegt 'key=value' in ('key', value).
+
+    Der Wert wird als JSON gelesen, wenn das klappt: 'duration=5' ergibt die
+    Zahl 5, 'enhance_prompt=true' den Wahrheitswert True. Alles andere bleibt Text.
+    """
+    if "=" not in text:
+        raise CliError(f"Parameter '{text}' hat nicht die Form key=value.")
+    key, raw_value = text.split("=", 1)
+    try:
+        value = json.loads(raw_value)
+    except json.JSONDecodeError:
+        value = raw_value
+    return key.strip(), value
+
+
+def build_payload(args: argparse.Namespace) -> dict:
+    """Baut den JSON-Body für eine Generierung.
+
+    Reihenfolge (spätere gewinnen): Modell-Defaults aus models.json,
+    dann --prompt/--image-url, dann --param.
+    """
+    model_info = load_models().get(args.model_id, {})
+    # dict(...) erzeugt eine Kopie, damit wir die geladenen Defaults nicht verändern.
+    payload = dict(model_info.get("defaults", {}))
+    payload["prompt"] = args.prompt
+    if args.image_url:
+        payload["image_url"] = args.image_url
+    for text in args.param:
+        key, value = parse_param(text)
+        payload[key] = value
+    return payload
+
+
+# --- HTTP -------------------------------------------------------------------
+
+
+def make_session() -> requests.Session:
+    """Erzeugt eine Session, die bei jedem Aufruf den Auth-Header mitschickt."""
+    key, secret = load_credentials()
+    session = requests.Session()
+    session.headers["Authorization"] = f"Key {key}:{secret}"
+    return session
+
+
+def retry_delay(attempt: int, retry_after: str | None = None) -> float:
+    """Wartezeit vor dem nächsten Versuch: 1, 2, 4 ... Sekunden plus etwas Zufall.
+
+    Schickt der Server einen Retry-After-Header, halten wir uns daran.
+    """
+    if retry_after and retry_after.isdigit():
+        return float(retry_after)
+    return 2 ** (attempt - 1) + random.uniform(0, 0.5)
+
+
+def describe_error(response: requests.Response) -> str:
+    """Macht aus einer Fehlerantwort eine kurze, lesbare Meldung."""
+    try:
+        detail = response.json().get("detail")
+    except (ValueError, AttributeError):
+        return response.text[:200] or response.reason
+    if isinstance(detail, dict):
+        # z. B. {"code": "account_queue_full", "message": "..."}
+        return detail.get("message") or json.dumps(detail)
+    if isinstance(detail, list):
+        # Validierungsfehler: Liste mit {"loc": [...], "msg": "..."}
+        parts = []
+        for item in detail:
+            location = ".".join(str(x) for x in item.get("loc", []) if x != "body")
+            parts.append(f"{location}: {item.get('msg')}" if location else str(item.get("msg")))
+        return "; ".join(parts)
+    return str(detail)
+
+
+def api_request(
+    session: requests.Session,
+    method: str,
+    path: str,
+    json_body: dict | None = None,
+    headers: dict | None = None,
+) -> dict:
+    """Schickt einen API-Aufruf und gibt die JSON-Antwort zurück.
+
+    - Timeout bei jedem Aufruf.
+    - Neue Versuche bei Netzwerkfehlern, 429 und 5xx (mit Backoff).
+    - Keine neuen Versuche bei anderen 4xx – da stimmt etwas an der Anfrage nicht.
+    """
+    url = path if path.startswith("http") else BASE_URL + path
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        is_last_attempt = attempt == MAX_ATTEMPTS
+        try:
+            response = session.request(method, url, json=json_body, headers=headers, timeout=HTTP_TIMEOUT)
+        except (requests.ConnectionError, requests.Timeout) as error:
+            if is_last_attempt:
+                raise CliError(f"Netzwerkfehler nach {MAX_ATTEMPTS} Versuchen: {type(error).__name__}")
+            time.sleep(retry_delay(attempt))
+            continue
+
+        if response.status_code in RETRY_STATUS_CODES and not is_last_attempt:
+            time.sleep(retry_delay(attempt, response.headers.get("Retry-After")))
+            continue
+
+        if response.status_code >= 400:
+            raise CliError(f"HTTP {response.status_code}: {describe_error(response)}")
+
+        # Manche Antworten (z. B. cancel) haben keinen Inhalt.
+        return response.json() if response.content else {}
+
+    # Wird nie erreicht – die Schleife endet immer mit return oder raise.
+    raise CliError("Unerwarteter Fehler in api_request.")
+
+
 # --- Befehle ----------------------------------------------------------------
 # Jede Funktion bekommt die geparsten Argumente (args) und gibt ein Dictionary
 # zurück. main() kümmert sich um die Ausgabe.
+
+
+def cmd_estimate(args: argparse.Namespace) -> dict:
+    payload = build_payload(args)
+    result = api_request(make_session(), "POST", f"/estimate/{args.model_id}", json_body=payload)
+    output = {"model": args.model_id, "usd": result.get("usd")}
+    if args.verbose:
+        output["payload"] = payload
+        output["response"] = result
+    return output
 
 
 def cmd_models(args: argparse.Namespace) -> dict:
@@ -109,7 +268,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     p = sub.add_parser("estimate", parents=[common, generation], help="Kosten vorab schätzen")
-    p.set_defaults(func=not_implemented)
+    p.set_defaults(func=cmd_estimate)
 
     p = sub.add_parser("submit", parents=[common, generation], help="Job abschicken")
     p.set_defaults(func=not_implemented)
@@ -144,6 +303,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    load_dotenv(ENV_FILE)
     try:
         result = args.func(args)
     except CliError as error:

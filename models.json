@@ -4,7 +4,16 @@
     "output": "images",
     "defaults": {"aspect_ratio": "4:3"},
     "tested": false,
-    "notes": "Doku widerspricht sich bei resolution (2K/4K vs. 720p) – im Testlauf klären."
+    "estimate_usd": {"720p": "0.094", "1080p": "0.188"},
+    "notes": "resolution: 720p (Standard) oder 1080p – 2K/4K aus der OpenAPI-Datei sind falsch. aspect_ratio: 9:16, 16:9, 4:3, 3:4, 1:1, 2:3, 3:2."
+  },
+  "higgsfield-ai/soul/v2/standard": {
+    "type": "text-to-image",
+    "output": "images",
+    "defaults": {"aspect_ratio": "4:3"},
+    "tested": false,
+    "estimate_usd": {"720p": "0.004"},
+    "notes": "Laut Quickstart-Doku. Estimate auffällig günstig – im Testlauf prüfen. Gleiche resolution/aspect_ratio-Werte wie soul/standard."
   },
   "minimax/hailuo-2.3/standard/image-to-video": {
     "type": "image-to-video",
@@ -12,6 +21,7 @@
     "defaults": {"duration": 6},
     "required": ["prompt", "image_url"],
     "tested": false,
+    "estimate_usd": {"6s": "0.238"},
     "notes": "duration: 6 oder 10"
   },
   "kling-video/v2.5-turbo/standard/image-to-video": {
@@ -20,6 +30,7 @@
     "defaults": {"duration": 5},
     "required": ["prompt", "image_url"],
     "tested": false,
-    "notes": "duration: 5 oder 10; optional negative_prompt, cfg_scale"
+    "estimate_usd": {"5s": "0.179", "10s": "0.357"},
+    "notes": "duration: 5 oder 10; optional negative_prompt, cfg_scale (0-1)"
   }
 }
