@@ -111,6 +111,8 @@ def load_credentials() -> tuple[str, str]:
     secret = os.environ.get("HF_API_SECRET")
     if not key or not secret:
         raise CliError("HF_API_KEY und HF_API_SECRET müssen gesetzt sein.", exit_code=2)
+    if key.startswith("your-") or secret.startswith("your-"):
+        raise CliError("In .env stehen noch die Platzhalter aus .env.example – echte Werte eintragen.", exit_code=2)
     return key, secret
 
 

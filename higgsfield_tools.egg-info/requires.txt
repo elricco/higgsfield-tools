@@ -1,4 +1,0 @@
-requests>=2.32
-
-[dev]
-pytest>=8.0

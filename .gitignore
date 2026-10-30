@@ -17,3 +17,7 @@ __pycache__/
 
 # Trainierte Charaktere (kontospezifische IDs)
 characters.json
+
+# Nebenprodukt von pip install -e .
+*.egg-info/
+build/

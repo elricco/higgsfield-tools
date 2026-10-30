@@ -174,6 +174,13 @@ def test_load_dotenv_missing_file_is_fine(tmp_path):
     hf.load_dotenv(tmp_path / "gibt-es-nicht")
 
 
+def test_load_credentials_placeholders(monkeypatch):
+    monkeypatch.setenv("HF_API_KEY", "your-api-key-id")
+    monkeypatch.setenv("HF_API_SECRET", "your-api-key-secret")
+    with pytest.raises(hf.CliError, match="Platzhalter"):
+        hf.load_credentials()
+
+
 def test_load_credentials_missing(monkeypatch):
     monkeypatch.delenv("HF_API_KEY", raising=False)
     monkeypatch.setenv("HF_API_SECRET", "s")
