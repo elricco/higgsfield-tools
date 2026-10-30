@@ -24,3 +24,6 @@ characters.json
 # By-product of pip install -e .
 *.egg-info/
 build/
+
+# Original project brief (kept local)
+higgsfield-claude-code-prompt.md
