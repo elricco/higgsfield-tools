@@ -72,8 +72,12 @@ def test_parse_docs_page_without_schema():
 def test_build_catalog_merges_api_and_docs():
     api_items = [
         {"slug": "z-image/turbo", "title": "Z-Image", "output_type": "image", "operation_type": ["text2image"]},
-        {"slug": "kling-video/v4.0/image-to-video", "title": "Kling 4.0", "output_type": "video",
-         "operation_type": ["image2video"]},
+        {
+            "slug": "kling-video/v4.0/image-to-video",
+            "title": "Kling 4.0",
+            "output_type": "video",
+            "operation_type": ["image2video"],
+        },
     ]
     docs = {"z-image/turbo": {"required": ["prompt"]}, "old/model": {"required": []}}
     models = catalog.build_catalog(api_items, docs)
@@ -84,16 +88,19 @@ def test_build_catalog_merges_api_and_docs():
     assert models["old/model"]["listed"] is False
 
 
-@pytest.mark.parametrize("filters, expected", [
-    ({}, True),
-    ({"output": "video"}, True),
-    ({"output": "image"}, False),
-    ({"operation": "image2video"}, True),
-    ({"operation": "text2video"}, False),
-    ({"search": "kling 4.0"}, True),
-    ({"search": "KLING"}, True),
-    ({"search": "kling 3.0"}, False),
-])
+@pytest.mark.parametrize(
+    "filters, expected",
+    [
+        ({}, True),
+        ({"output": "video"}, True),
+        ({"output": "image"}, False),
+        ({"operation": "image2video"}, True),
+        ({"operation": "text2video"}, False),
+        ({"search": "kling 4.0"}, True),
+        ({"search": "KLING"}, True),
+        ({"search": "kling 3.0"}, False),
+    ],
+)
 def test_matches(filters, expected):
     model = {"title": "Kling 4.0", "output": "video", "operations": ["image2video"]}
     assert catalog.matches("kling-video/v4.0/image-to-video", model, **filters) is expected

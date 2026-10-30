@@ -12,9 +12,16 @@ from pathlib import Path
 
 # File extension -> how the browser shows it.
 MEDIA_KINDS = {
-    ".png": "image", ".jpg": "image", ".jpeg": "image", ".webp": "image", ".gif": "image",
-    ".mp4": "video", ".mov": "video", ".webm": "video",
-    ".mp3": "audio", ".wav": "audio",
+    ".png": "image",
+    ".jpg": "image",
+    ".jpeg": "image",
+    ".webp": "image",
+    ".gif": "image",
+    ".mp4": "video",
+    ".mov": "video",
+    ".webm": "video",
+    ".mp3": "audio",
+    ".wav": "audio",
 }
 # A request_id looks like 01a18e05-d3c1-75ee-9ca0-781c72b85a9f.
 REQUEST_ID_PATTERN = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
@@ -79,14 +86,14 @@ def render_card(item: dict) -> str:
     prompt = item.get("prompt") or ""
     search_text = f"{model} {prompt} {item['request_id']}".lower()
     return f"""
-<article class=card data-model="{esc(model)}" data-kinds="{esc(' '.join(kinds))}" data-search="{esc(search_text)}">
+<article class=card data-model="{esc(model)}" data-kinds="{esc(" ".join(kinds))}" data-search="{esc(search_text)}">
   <div class=media>{media}</div>
   <div class=body>
-    <p class=prompt>{esc(prompt or 'no prompt recorded')}</p>
-    <p class=meta><span>{esc(model or 'unknown model')}</span><span>{format_usd(item.get('usd'))}</span><span>{esc(item['date'])}</span></p>
+    <p class=prompt>{esc(prompt or "no prompt recorded")}</p>
+    <p class=meta><span>{esc(model or "unknown model")}</span><span>{format_usd(item.get("usd"))}</span><span>{esc(item["date"])}</span></p>
     {chips}
     <details><summary>Details</summary>
-      <p class=small>request_id: <code>{esc(item['request_id'])}</code></p>
+      <p class=small>request_id: <code>{esc(item["request_id"])}</code></p>
       {repeat}
       <p class=small>{paths}</p>
     </details>
@@ -142,7 +149,7 @@ pre {{ white-space: pre-wrap; word-break: break-all; background: var(--chip); pa
   <select id=model><option value="">All models</option>{options}</select>
   <select id=kind><option value="">Images and videos</option><option value=image>Images</option><option value=video>Videos</option></select>
 </header>
-<main>{cards or '<p class=empty>No results yet. Run a job with hf run.</p>'}</main>
+<main>{cards or "<p class=empty>No results yet. Run a job with hf run.</p>"}</main>
 <script>
 // Hides every card that does not match the search box and the two dropdowns.
 const controls = ["search", "model", "kind"].map((id) => document.getElementById(id));

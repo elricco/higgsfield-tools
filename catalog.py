@@ -101,10 +101,7 @@ def parse_docs(text: str) -> dict:
         models[endpoint.group(1)] = {
             "docs_url": source.group(1) if source else None,
             "required": schema.get("required", []),
-            "params": {
-                name: summarize_param(spec)
-                for name, spec in schema.get("properties", {}).items()
-            },
+            "params": {name: summarize_param(spec) for name, spec in schema.get("properties", {}).items()},
             "notes": extract_usage_notes(page),
         }
     return models
@@ -134,13 +131,13 @@ def build_catalog(api_items: list[dict], docs: dict) -> dict:
         }
     for slug, doc in docs.items():
         if slug not in models:
-            models[slug] = {"title": None, "output": None, "operations": [],
-                            "listed": False, "documented": True, **doc}
+            models[slug] = {"title": None, "output": None, "operations": [], "listed": False, "documented": True, **doc}
     return models
 
 
-def matches(model_id: str, model: dict, output: str | None = None,
-            operation: str | None = None, search: str | None = None) -> bool:
+def matches(
+    model_id: str, model: dict, output: str | None = None, operation: str | None = None, search: str | None = None
+) -> bool:
     """Checks whether a model matches the filters (None = filter not set)."""
     if output and model.get("output") != output:
         return False

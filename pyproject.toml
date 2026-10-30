@@ -10,7 +10,7 @@ requires-python = ">=3.10"
 dependencies = ["requests>=2.32"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "ruff>=0.6"]
 
 # Creates the command "hf", which calls hf.main().
 [project.scripts]
@@ -19,3 +19,17 @@ hf = "hf:main"
 [tool.setuptools]
 # No package folders, just single modules in the project folder.
 py-modules = ["hf", "catalog", "gallery"]
+
+# Linter and formatter: 'ruff check .' and 'ruff format .'
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+# E/W: style errors, F: real mistakes (unused names, undefined variables),
+# I: import order, B: likely bugs ("bugbear"), UP: newer Python syntax where possible.
+select = ["E", "F", "W", "I", "B", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+# The HTML/CSS template reads best with one CSS rule or element per line.
+"gallery.py" = ["E501"]

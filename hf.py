@@ -77,19 +77,21 @@ VIEWS_PARAMS = ["aspect_ratio=3:4", "resolution=1k"]
 # Directions are described by the side of the IMAGE: "turn to her left" gave the wrong side.
 CHARACTER_VIEWS = {
     "three-quarter-left": "Three-quarter view: the nose points toward the LEFT edge of the image, "
-                          "head turned about 45 degrees, eyes looking past the camera to the left.",
+    "head turned about 45 degrees, eyes looking past the camera to the left.",
     "profile-left": "Full side profile: the nose points toward the LEFT edge of the image, "
-                    "head turned 90 degrees, one ear visible.",
+    "head turned 90 degrees, one ear visible.",
     "three-quarter-right": "Three-quarter view: the nose points toward the RIGHT edge of the image, "
-                           "head turned about 45 degrees, eyes looking past the camera to the right.",
+    "head turned about 45 degrees, eyes looking past the camera to the right.",
     "profile-right": "Full side profile: the nose points toward the RIGHT edge of the image, "
-                     "head turned 90 degrees, one ear visible.",
+    "head turned 90 degrees, one ear visible.",
     "smiling": "Facing the camera with a gentle natural smile, warm golden late-afternoon light from the side.",
 }
 # Appended to every view so the edit model keeps the identity.
-VIEWS_KEEP = ("Same person as in the reference image: identical face, identical facial proportions, "
-              "same hairstyle and hair color, same skin details, same eye color, same clothing. "
-              "Head and shoulders, plain light grey background, soft even daylight, photorealistic studio photo.")
+VIEWS_KEEP = (
+    "Same person as in the reference image: identical face, identical facial proportions, "
+    "same hairstyle and hair color, same skin details, same eye color, same clothing. "
+    "Head and shoulders, plain light grey background, soft even daylight, photorealistic studio photo."
+)
 # File extensions in case the URL does not reveal one.
 FALLBACK_EXTENSIONS = {"images": ".jpg", "video": ".mp4", "audio": ".mp3", "audios": ".mp3"}
 
@@ -152,10 +154,12 @@ def load_models() -> dict:
     """Reads the local model list from models.json."""
     try:
         return json.loads(MODELS_FILE.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        raise CliError(f"{MODELS_FILE.name} not found.")
+    except FileNotFoundError as error:
+        # "from error" keeps the original exception as the cause: hidden normally,
+        # but visible in the stack trace with --verbose.
+        raise CliError(f"{MODELS_FILE.name} not found.") from error
     except json.JSONDecodeError as error:
-        raise CliError(f"{MODELS_FILE.name} is not valid JSON: {error}")
+        raise CliError(f"{MODELS_FILE.name} is not valid JSON: {error}") from error
 
 
 def read_json_file(path: Path, default):
@@ -164,8 +168,8 @@ def read_json_file(path: Path, default):
         return default
     try:
         return json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        raise CliError(f"{path.name} is not valid JSON.")
+    except json.JSONDecodeError as error:
+        raise CliError(f"{path.name} is not valid JSON.") from error
 
 
 def write_json_file(path: Path, data) -> None:
@@ -191,10 +195,7 @@ def load_history() -> dict:
         history = json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return {}
-    return {
-        request_id: job if isinstance(job, dict) else {"model": job}
-        for request_id, job in history.items()
-    }
+    return {request_id: job if isinstance(job, dict) else {"model": job} for request_id, job in history.items()}
 
 
 def update_job(request_id: str, **fields) -> dict:
@@ -327,7 +328,7 @@ def api_request(
             response = session.request(method, url, json=json_body, headers=headers, timeout=HTTP_TIMEOUT)
         except (requests.ConnectionError, requests.Timeout) as error:
             if is_last_attempt:
-                raise CliError(f"Network error after {MAX_ATTEMPTS} attempts: {type(error).__name__}")
+                raise CliError(f"Network error after {MAX_ATTEMPTS} attempts: {type(error).__name__}") from error
             time.sleep(retry_delay(attempt))
             continue
 
@@ -366,7 +367,7 @@ def download_file(url: str, target: Path) -> None:
                 return
         except (requests.ConnectionError, requests.Timeout) as error:
             if attempt == MAX_ATTEMPTS:
-                raise CliError(f"Download failed: {type(error).__name__}")
+                raise CliError(f"Download failed: {type(error).__name__}") from error
             time.sleep(retry_delay(attempt))
 
 
@@ -395,17 +396,20 @@ def upload_file(session: requests.Session, path: Path) -> str:
     if not path.is_file():
         raise CliError(f"File not found: {path}")
     content_type = guess_content_type(path)
-    upload = api_request(session, "POST", "/files/generate-upload-url",
-                         json_body={"content_type": content_type})
+    upload = api_request(session, "POST", "/files/generate-upload-url", json_body={"content_type": content_type})
 
     for attempt in range(1, MAX_ATTEMPTS + 1):
         try:
             # requests.put instead of session.put: no Authorization header to the storage.
-            response = requests.put(upload["upload_url"], data=path.read_bytes(),
-                                    headers=upload.get("upload_headers", {}), timeout=UPLOAD_TIMEOUT)
+            response = requests.put(
+                upload["upload_url"],
+                data=path.read_bytes(),
+                headers=upload.get("upload_headers", {}),
+                timeout=UPLOAD_TIMEOUT,
+            )
         except (requests.ConnectionError, requests.Timeout) as error:
             if attempt == MAX_ATTEMPTS:
-                raise CliError(f"Upload failed: {type(error).__name__}")
+                raise CliError(f"Upload failed: {type(error).__name__}") from error
             time.sleep(retry_delay(attempt))
             continue
         if response.status_code in RETRY_STATUS_CODES and attempt < MAX_ATTEMPTS:
@@ -448,8 +452,7 @@ def run_ffmpeg(arguments: list[str]) -> None:
     if shutil.which("ffmpeg") is None:
         raise CliError("ffmpeg not found. Install it, e.g. 'brew install ffmpeg'.")
     # capture_output keeps ffmpeg's long log out of our one-line JSON output.
-    completed = subprocess.run(["ffmpeg", "-y", "-loglevel", "error", *arguments],
-                               capture_output=True, text=True)
+    completed = subprocess.run(["ffmpeg", "-y", "-loglevel", "error", *arguments], capture_output=True, text=True)
     if completed.returncode != 0:
         # [-300:] keeps only the end of the message, where the actual error is.
         raise CliError(f"ffmpeg failed: {completed.stderr.strip()[-300:]}")
@@ -485,14 +488,19 @@ def cmd_concat(args: argparse.Namespace) -> dict:
         # -c copy joins without re-encoding: fast and lossless, but all clips need the same format.
         run_ffmpeg(["-f", "concat", "-safe", "0", "-i", listing.name, "-c", "copy", str(target)])
     except CliError as error:
-        raise CliError(f"{error} – concat only works for clips with the same model and settings.")
+        raise CliError(f"{error} – concat only works for clips with the same model and settings.") from error
     finally:
         os.unlink(listing.name)
     # kind "local": shows up in the gallery, but 'hf spend' ignores it (nothing was paid).
-    update_job(f"concat-{now:%Y%m%d-%H%M%S}", kind="local", model="ffmpeg concat",
-               prompt=f"{len(clips)} clips joined: " + ", ".join(clip.name for clip in clips),
-               submitted=now.isoformat(timespec="seconds"), status="completed",
-               files=[str(target.resolve())])
+    update_job(
+        f"concat-{now:%Y%m%d-%H%M%S}",
+        kind="local",
+        model="ffmpeg concat",
+        prompt=f"{len(clips)} clips joined: " + ", ".join(clip.name for clip in clips),
+        submitted=now.isoformat(timespec="seconds"),
+        status="completed",
+        files=[str(target.resolve())],
+    )
     refresh_gallery(args.open)
     return {"file": str(target), "clips": len(clips)}
 
@@ -546,16 +554,24 @@ def cmd_character_create(args: argparse.Namespace) -> dict:
     check_budget(cost, max_usd)
     result = api_request(session, "POST", "/v1/custom-references", json_body=payload)
     # The training goes into the job log as well, so that 'hf spend' counts it.
-    update_job(result["id"], model=SOUL_ID_ESTIMATE, prompt=f"Soul ID training: {args.name}",
-               usd=cost["usd"], submitted=datetime.now().isoformat(timespec="seconds"),
-               status=result.get("status"))
-    save_character(args.name, {
-        "id": result["id"],
-        "model_version": args.model_version,
-        "status": result.get("status"),
-        "created": date.today().isoformat(),
-        "images": [str(value) for value in args.images],
-    })
+    update_job(
+        result["id"],
+        model=SOUL_ID_ESTIMATE,
+        prompt=f"Soul ID training: {args.name}",
+        usd=cost["usd"],
+        submitted=datetime.now().isoformat(timespec="seconds"),
+        status=result.get("status"),
+    )
+    save_character(
+        args.name,
+        {
+            "id": result["id"],
+            "model_version": args.model_version,
+            "status": result.get("status"),
+            "created": date.today().isoformat(),
+            "images": [str(value) for value in args.images],
+        },
+    )
     return {"name": args.name, "id": result["id"], "status": result.get("status"), "usd": cost["usd"]}
 
 
@@ -579,12 +595,15 @@ def cmd_character_add(args: argparse.Namespace) -> dict:
         raise CliError(f"A character '{args.name}' already exists.")
     # Check that the ID belongs to this account – costs nothing.
     result = api_request(make_session(), "GET", f"/v1/custom-references/{args.id}")
-    save_character(args.name, {
-        "id": args.id,
-        "model_version": args.model_version,
-        "status": result.get("status"),
-        "added": date.today().isoformat(),
-    })
+    save_character(
+        args.name,
+        {
+            "id": args.id,
+            "model_version": args.model_version,
+            "status": result.get("status"),
+            "added": date.today().isoformat(),
+        },
+    )
     return {"name": args.name, "id": args.id, "status": result.get("status")}
 
 
@@ -633,8 +652,7 @@ def extract_outputs(result: dict) -> list[tuple[str, str]]:
     return outputs
 
 
-def output_filename(model_id: str, request_id: str, field: str, url: str,
-                    index: int, total: int, day: date) -> str:
+def output_filename(model_id: str, request_id: str, field: str, url: str, index: int, total: int, day: date) -> str:
     """Builds the file name: <date>_<model>_<request_id>[_<n>].<extension>"""
     model_slug = model_id.replace("/", "-")
     extension = Path(urlparse(url).path).suffix or FALLBACK_EXTENSIONS.get(field, "")
@@ -686,8 +704,7 @@ def save_outputs(result: dict, job: dict, out_dir: Path) -> list[str]:
     paths = []
     # enumerate(..., start=1) yields number and element: (1, a), (2, b), ...
     for index, (field, url) in enumerate(outputs, start=1):
-        name = output_filename(job.get("model", "unknown"), request_id, field, url,
-                               index, len(outputs), date.today())
+        name = output_filename(job.get("model", "unknown"), request_id, field, url, index, len(outputs), date.today())
         target = out_dir / name
         download_file(url, target)
         # with_suffix swaps the extension: x.png -> x.json
@@ -731,8 +748,8 @@ def env_max_usd() -> float | None:
         return None
     try:
         return float(value)
-    except ValueError:
-        raise CliError(f"{MAX_USD_ENV} must be a number, e.g. 0.50 (is '{value}').")
+    except ValueError as error:
+        raise CliError(f"{MAX_USD_ENV} must be a number, e.g. 0.50 (is '{value}').") from error
 
 
 def max_usd_limit(args: argparse.Namespace) -> float | None:
@@ -754,9 +771,13 @@ def check_budget(cost: dict, max_usd: float | None) -> None:
         return
     if cost["usd"] is None:
         reason = cost["pricing"] or "no estimate available"
-        raise CliError(f"Price unknown ({reason}), so the limit of ${max_usd:.3f} cannot be checked. Nothing was submitted.")
+        raise CliError(
+            f"Price unknown ({reason}), so the limit of ${max_usd:.3f} cannot be checked. Nothing was submitted."
+        )
     if cost["usd"] > max_usd:
-        raise CliError(f"Estimated cost ${cost['usd']:.3f} is above the limit of ${max_usd:.3f}. Nothing was submitted.")
+        raise CliError(
+            f"Estimated cost ${cost['usd']:.3f} is above the limit of ${max_usd:.3f}. Nothing was submitted."
+        )
 
 
 def prepare_job(session: requests.Session, args: argparse.Namespace) -> dict:
@@ -833,7 +854,7 @@ def cmd_cancel(args: argparse.Namespace) -> dict:
     except CliError as error:
         if str(error).startswith("HTTP 400"):
             # According to the docs: 400 means the job is already running and can no longer be canceled.
-            raise CliError(f"Job {args.request_id} is already running and can no longer be canceled.")
+            raise CliError(f"Job {args.request_id} is already running and can no longer be canceled.") from error
         raise
     return {"request_id": args.request_id, "status": "canceled"}
 
@@ -928,9 +949,16 @@ def summarize_many(entries: list[dict]) -> dict:
 def view_args(view: str, base_url: str, args: argparse.Namespace) -> argparse.Namespace:
     """The arguments for one view, as if typed as 'hf run ...'."""
     prompt = " ".join(part for part in (CHARACTER_VIEWS[view], args.details, VIEWS_KEEP) if part)
-    return argparse.Namespace(model_id=args.model, prompt=prompt, image_url=None, image_urls=[base_url],
-                              character=None, param=list(VIEWS_PARAMS), max_usd=None,
-                              from_last_frame=None)
+    return argparse.Namespace(
+        model_id=args.model,
+        prompt=prompt,
+        image_url=None,
+        image_urls=[base_url],
+        character=None,
+        param=list(VIEWS_PARAMS),
+        max_usd=None,
+        from_last_frame=None,
+    )
 
 
 def cmd_character_views(args: argparse.Namespace) -> dict:
@@ -942,7 +970,8 @@ def cmd_character_views(args: argparse.Namespace) -> dict:
     # Check the price for all views together before anything is submitted.
     check_many_budget(jobs, args.max_usd)
     entries = run_many(session, jobs, args.timeout, args.out)
-    for view, entry in zip(args.views, entries):
+    # strict=True raises an error if the two lists ever have different lengths.
+    for view, entry in zip(args.views, entries, strict=True):
         entry["view"] = view
     refresh_gallery(args.open)
     return {"base": str(args.base), "views": entries, **summarize_many(entries)}
@@ -956,16 +985,25 @@ def batch_job_args(data: dict, default_model: str | None, line_number: int) -> a
     """Turns one line of a batch file into the same arguments 'hf run' would get."""
     unknown = set(data) - BATCH_FIELDS
     if unknown:
-        raise CliError(f"Line {line_number}: unknown field(s) {', '.join(sorted(unknown))}. "
-                       f"Allowed: {', '.join(sorted(BATCH_FIELDS))}")
+        raise CliError(
+            f"Line {line_number}: unknown field(s) {', '.join(sorted(unknown))}. "
+            f"Allowed: {', '.join(sorted(BATCH_FIELDS))}"
+        )
     model = data.get("model") or default_model
     if not model or not data.get("prompt"):
         raise CliError(f"Line {line_number}: 'prompt' and 'model' (or --model) are required.")
     # json.dumps keeps the type: 5 stays a number, "16:9" stays text, when parse_param reads it back.
     params = [f"{key}={json.dumps(value)}" for key, value in data.get("params", {}).items()]
-    return argparse.Namespace(model_id=model, prompt=data["prompt"], image_url=data.get("image_url"),
-                              image_urls=data.get("image_urls"), character=data.get("character"),
-                              param=params, max_usd=None, from_last_frame=data.get("from_last_frame"))
+    return argparse.Namespace(
+        model_id=model,
+        prompt=data["prompt"],
+        image_url=data.get("image_url"),
+        image_urls=data.get("image_urls"),
+        character=data.get("character"),
+        param=params,
+        max_usd=None,
+        from_last_frame=data.get("from_last_frame"),
+    )
 
 
 def read_batch_file(path: Path, default_model: str | None) -> list[argparse.Namespace]:
@@ -980,7 +1018,7 @@ def read_batch_file(path: Path, default_model: str | None) -> list[argparse.Name
         try:
             data = json.loads(line)
         except json.JSONDecodeError as error:
-            raise CliError(f"Line {line_number}: not valid JSON ({error.msg}).")
+            raise CliError(f"Line {line_number}: not valid JSON ({error.msg}).") from error
         if not isinstance(data, dict):
             raise CliError(f"Line {line_number}: expected a JSON object {{...}}.")
         jobs.append(batch_job_args(data, default_model, line_number))
@@ -996,9 +1034,15 @@ def cmd_batch(args: argparse.Namespace) -> dict:
     jobs = [prepare_job(session, single) for single in job_args]
     if args.dry_run:
         return {
-            "jobs": [{"model": job["args"].model_id, "prompt": job["args"].prompt[:60], "usd": job["cost"]["usd"],
-                      **({"pricing": job["cost"]["pricing"]} if job["cost"].get("pricing") else {})}
-                     for job in jobs],
+            "jobs": [
+                {
+                    "model": job["args"].model_id,
+                    "prompt": job["args"].prompt[:60],
+                    "usd": job["cost"]["usd"],
+                    **({"pricing": job["cost"]["pricing"]} if job["cost"].get("pricing") else {}),
+                }
+                for job in jobs
+            ],
             "estimated_usd": total_cost(jobs)["usd"],
         }
     # --max-usd is the limit for the whole batch here; HF_MAX_USD still applies to each job.
@@ -1056,9 +1100,18 @@ def gallery_items() -> tuple[list[dict], int]:
         if not files:
             continue
         # Old entries have no "submitted" – then the file's modification time has to do.
-        submitted = job.get("submitted") or datetime.fromtimestamp(Path(files[0]).stat().st_mtime).isoformat(timespec="seconds")
-        items.append({**job, "request_id": request_id, "files": files,
-                      "submitted": submitted, "date": submitted[:16].replace("T", " ")})
+        submitted = job.get("submitted") or datetime.fromtimestamp(Path(files[0]).stat().st_mtime).isoformat(
+            timespec="seconds"
+        )
+        items.append(
+            {
+                **job,
+                "request_id": request_id,
+                "files": files,
+                "submitted": submitted,
+                "date": submitted[:16].replace("T", " "),
+            }
+        )
     items.sort(key=lambda item: item["submitted"], reverse=True)
     return items, missing
 
@@ -1116,8 +1169,7 @@ def filtered_models(args: argparse.Namespace) -> dict:
     return {
         model_id: model
         for model_id, model in models.items()
-        if (model.get("listed") or args.all)
-        and catalog.matches(model_id, model, args.output, args.op, args.search)
+        if (model.get("listed") or args.all) and catalog.matches(model_id, model, args.output, args.op, args.search)
     }
 
 
@@ -1149,7 +1201,7 @@ def cmd_models(args: argparse.Namespace) -> dict:
         # sorted(..., key=...) sorts by the value the key function returns.
         rows.sort(key=lambda row: catalog.price_sort_key(prices.get(row["id"])))
     if args.limit:
-        rows = rows[:args.limit]
+        rows = rows[: args.limit]
     return {"count": len(rows), "models": rows}
 
 
@@ -1175,8 +1227,11 @@ def check_api() -> str:
     key, secret = load_credentials()
     try:
         # Deliberately without api_request: no retries, short timeout – a check should be fast.
-        response = requests.get(f"{BASE_URL}/requests/00000000-0000-0000-0000-000000000000/status",
-                                headers={"Authorization": f"Key {key}:{secret}"}, timeout=10)
+        response = requests.get(
+            f"{BASE_URL}/requests/00000000-0000-0000-0000-000000000000/status",
+            headers={"Authorization": f"Key {key}:{secret}"},
+            timeout=10,
+        )
     except requests.RequestException as error:
         return f"unreachable ({type(error).__name__}) – firewall? allow *.higgsfield.ai"
     if response.status_code == 404:
@@ -1246,8 +1301,9 @@ def cmd_catalog_update(args: argparse.Namespace) -> dict:
     }
 
 
-def estimate_with_learning(session: requests.Session, model_id: str, model: dict,
-                           payload: dict, max_tries: int = 5) -> dict:
+def estimate_with_learning(
+    session: requests.Session, model_id: str, model: dict, payload: dict, max_tries: int = 5
+) -> dict:
     """Asks for the price and adds missing required fields automatically.
 
     The docs do not always list all required fields. If the API reports
@@ -1314,20 +1370,31 @@ def build_parser() -> argparse.ArgumentParser:
     generation.add_argument("model_id", help="e.g. higgsfield-ai/soul/standard")
     generation.add_argument("--prompt", required=True)
     generation.add_argument("--image-url", help="input image: URL or local file (gets uploaded)")
-    generation.add_argument("--image-urls", nargs="+", metavar="IMAGE",
-                            help="several input images (for edit models), URLs or local files")
-    generation.add_argument("--character", help="trained Soul ID character (name or ID)")
-    generation.add_argument("--from-last-frame", metavar="VIDEO",
-                            help="start from the last frame of a video (file or request_id), needs ffmpeg")
     generation.add_argument(
-        "--param", action="append", default=[], metavar="KEY=VALUE",
+        "--image-urls", nargs="+", metavar="IMAGE", help="several input images (for edit models), URLs or local files"
+    )
+    generation.add_argument("--character", help="trained Soul ID character (name or ID)")
+    generation.add_argument(
+        "--from-last-frame",
+        metavar="VIDEO",
+        help="start from the last frame of a video (file or request_id), needs ffmpeg",
+    )
+    generation.add_argument(
+        "--param",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
         help="additional model parameter, can be repeated",
     )
 
     # Only for commands that really submit a job (submit, run).
     budget = argparse.ArgumentParser(add_help=False)
-    budget.add_argument("--max-usd", type=float, metavar="USD",
-                        help=f"do not submit if the estimate is higher (default: ${MAX_USD_ENV} if set)")
+    budget.add_argument(
+        "--max-usd",
+        type=float,
+        metavar="USD",
+        help=f"do not submit if the estimate is higher (default: ${MAX_USD_ENV} if set)",
+    )
 
     p = sub.add_parser("estimate", parents=[common, generation], help="estimate the cost up front")
     p.set_defaults(func=cmd_estimate)
@@ -1366,10 +1433,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--timeout", type=int, default=600)
     p.set_defaults(func=cmd_run)
 
-    p = sub.add_parser("batch", parents=[common, budget, results],
-                       help="run all jobs from a JSON Lines file in parallel (costs money!)")
-    p.add_argument("file", type=Path, help="one job per line, e.g. {\"prompt\": \"...\", \"params\": {\"duration\": 5}}")
-    p.add_argument("--model", help="model for lines without a \"model\" field")
+    p = sub.add_parser(
+        "batch",
+        parents=[common, budget, results],
+        help="run all jobs from a JSON Lines file in parallel (costs money!)",
+    )
+    p.add_argument("file", type=Path, help='one job per line, e.g. {"prompt": "...", "params": {"duration": 5}}')
+    p.add_argument("--model", help='model for lines without a "model" field')
     p.add_argument("--dry-run", action="store_true", help="only show the estimated prices, submit nothing")
     p.add_argument("--timeout", type=int, default=900)
     p.set_defaults(func=cmd_batch)
@@ -1381,8 +1451,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_concat)
 
     p = sub.add_parser("gallery", parents=[common], help="HTML overview of all results, opens in the browser")
-    p.add_argument("--scan", type=Path, metavar="FOLDER",
-                   help="first add older result files from this folder to the job log")
+    p.add_argument(
+        "--scan", type=Path, metavar="FOLDER", help="first add older result files from this folder to the job log"
+    )
     p.add_argument("--no-open", action="store_true", help="only write gallery.html, do not open it")
     p.set_defaults(func=cmd_gallery)
 
@@ -1411,18 +1482,30 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("character", parents=[common], help="train and manage Soul ID characters")
     character_sub = p.add_subparsers(dest="character_command", required=True)
-    p = character_sub.add_parser("create", parents=[common, budget], help="train a character from images (costs money!)")
+    p = character_sub.add_parser(
+        "create", parents=[common, budget], help="train a character from images (costs money!)"
+    )
     p.add_argument("name")
     p.add_argument("images", nargs="+", help="image URLs or local files (1-100)")
-    p.add_argument("--model-version", choices=["v1", "v2", "cinema"], default="v2",
-                   help="SOUL family the character is used with (default: v2)")
+    p.add_argument(
+        "--model-version",
+        choices=["v1", "v2", "cinema"],
+        default="v2",
+        help="SOUL family the character is used with (default: v2)",
+    )
     p.set_defaults(func=cmd_character_create)
-    p = character_sub.add_parser("views", parents=[common, budget, results],
-                                 help="create training views from one base portrait (costs money!)")
+    p = character_sub.add_parser(
+        "views", parents=[common, budget, results], help="create training views from one base portrait (costs money!)"
+    )
     p.add_argument("base", help="base portrait, frontal: URL or local file")
     p.add_argument("--details", help="features to keep, e.g. 'dark curly hair tied back, freckles, green eyes'")
-    p.add_argument("--views", nargs="+", choices=list(CHARACTER_VIEWS), default=list(CHARACTER_VIEWS),
-                   help="which views (default: all five)")
+    p.add_argument(
+        "--views",
+        nargs="+",
+        choices=list(CHARACTER_VIEWS),
+        default=list(CHARACTER_VIEWS),
+        help="which views (default: all five)",
+    )
     p.add_argument("--model", default=VIEWS_MODEL, help=f"edit model (default: {VIEWS_MODEL})")
     p.add_argument("--timeout", type=int, default=900)
     p.set_defaults(func=cmd_character_views)

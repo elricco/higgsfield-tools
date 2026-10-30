@@ -14,7 +14,6 @@ import requests
 
 import hf
 
-
 # --- Helper classes ---------------------------------------------------------
 
 
@@ -99,9 +98,13 @@ def characters_file(tmp_path, monkeypatch):
 def models_file(tmp_path, monkeypatch):
     """A small models.json in the temporary folder instead of the real one."""
     path = tmp_path / "models.json"
-    path.write_text(json.dumps({
-        "test/image": {"type": "text-to-image", "defaults": {"aspect_ratio": "4:3", "resolution": "720p"}},
-    }))
+    path.write_text(
+        json.dumps(
+            {
+                "test/image": {"type": "text-to-image", "defaults": {"aspect_ratio": "4:3", "resolution": "720p"}},
+            }
+        )
+    )
     monkeypatch.setattr(hf, "MODELS_FILE", path)
     return path
 
@@ -109,14 +112,17 @@ def models_file(tmp_path, monkeypatch):
 # --- Parameters -------------------------------------------------------------
 
 
-@pytest.mark.parametrize("text, expected", [
-    ("duration=5", ("duration", 5)),
-    ("cfg_scale=0.5", ("cfg_scale", 0.5)),
-    ("enhance_prompt=true", ("enhance_prompt", True)),
-    ("aspect_ratio=16:9", ("aspect_ratio", "16:9")),
-    ("style_id=abc=def", ("style_id", "abc=def")),
-    ("prompt=", ("prompt", "")),
-])
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("duration=5", ("duration", 5)),
+        ("cfg_scale=0.5", ("cfg_scale", 0.5)),
+        ("enhance_prompt=true", ("enhance_prompt", True)),
+        ("aspect_ratio=16:9", ("aspect_ratio", "16:9")),
+        ("style_id=abc=def", ("style_id", "abc=def")),
+        ("prompt=", ("prompt", "")),
+    ],
+)
 def test_parse_param(text, expected):
     assert hf.parse_param(text) == expected
 
@@ -129,19 +135,25 @@ def test_parse_param_without_equals_sign():
 
 def generation_args(**overrides) -> argparse.Namespace:
     """Arguments as from 'submit'/'run'; individual fields can be overridden."""
-    values = {"model_id": "test/image", "prompt": "p", "image_url": None,
-              "image_urls": None, "character": None, "param": [], "max_usd": None,
-              "from_last_frame": None}
+    values = {
+        "model_id": "test/image",
+        "prompt": "p",
+        "image_url": None,
+        "image_urls": None,
+        "character": None,
+        "param": [],
+        "max_usd": None,
+        "from_last_frame": None,
+    }
     values.update(overrides)
     return argparse.Namespace(**values)
 
 
 def test_build_payload_order(models_file):
-    args = generation_args(prompt="a lake", image_url="https://x/a.jpg",
-                           param=["resolution=1080p", "seed=7"])
+    args = generation_args(prompt="a lake", image_url="https://x/a.jpg", param=["resolution=1080p", "seed=7"])
     assert hf.build_payload(args) == {
-        "aspect_ratio": "4:3",          # from models.json
-        "resolution": "1080p",          # --param overrides the default
+        "aspect_ratio": "4:3",  # from models.json
+        "resolution": "1080p",  # --param overrides the default
         "prompt": "a lake",
         "image_url": "https://x/a.jpg",
         "seed": 7,
@@ -174,11 +186,7 @@ def test_build_payload_character_strength_can_be_overridden(models_file, charact
 def test_load_dotenv(tmp_path, monkeypatch):
     env = tmp_path / ".env"
     env.write_text(
-        "# comment\n"
-        "\n"
-        "HF_API_KEY=key-from-file\n"
-        'export HF_API_SECRET="secret=with=equals"\n'
-        "HF_OTHER=from-file\n"
+        '# comment\n\nHF_API_KEY=key-from-file\nexport HF_API_SECRET="secret=with=equals"\nHF_OTHER=from-file\n'
     )
     monkeypatch.delenv("HF_API_KEY", raising=False)
     monkeypatch.delenv("HF_API_SECRET", raising=False)
@@ -252,8 +260,15 @@ def test_extract_outputs_empty():
 
 
 def test_output_filename_single_file():
-    name = hf.output_filename("kling-video/v2.5-turbo/standard/image-to-video", "r1", "video",
-                              "https://cdn/x/video.mp4?sig=1", 1, 1, date(2026, 10, 30))
+    name = hf.output_filename(
+        "kling-video/v2.5-turbo/standard/image-to-video",
+        "r1",
+        "video",
+        "https://cdn/x/video.mp4?sig=1",
+        1,
+        1,
+        date(2026, 10, 30),
+    )
     assert name == "2026-10-30_kling-video-v2.5-turbo-standard-image-to-video_r1.mp4"
 
 
@@ -270,12 +285,15 @@ def test_output_filename_fallback_extension():
 # --- Error messages ---------------------------------------------------------
 
 
-@pytest.mark.parametrize("body, expected", [
-    ({"detail": "Invalid credentials"}, "Invalid credentials"),
-    ({"detail": ": 'image_url' is a required property"}, "'image_url' is a required property"),
-    ({"detail": [{"loc": ["body", "resolution"], "msg": "bad value"}]}, "resolution: bad value"),
-    ({"detail": {"code": "account_queue_full", "message": "Too many queued"}}, "Too many queued"),
-])
+@pytest.mark.parametrize(
+    "body, expected",
+    [
+        ({"detail": "Invalid credentials"}, "Invalid credentials"),
+        ({"detail": ": 'image_url' is a required property"}, "'image_url' is a required property"),
+        ({"detail": [{"loc": ["body", "resolution"], "msg": "bad value"}]}, "resolution: bad value"),
+        ({"detail": {"code": "account_queue_full", "message": "Too many queued"}}, "Too many queued"),
+    ],
+)
 def test_describe_error(body, expected):
     assert hf.describe_error(FakeResponse(400, body)) == expected
 
@@ -406,8 +424,13 @@ def test_load_history_converts_old_entries(history_file):
 
 def test_save_outputs_writes_sidecar_and_logs_files(tmp_path, monkeypatch):
     monkeypatch.setattr(hf, "download_file", lambda url, target: target.write_bytes(b"IMG"))
-    job = {"model": "a/b", "prompt": "a lake", "payload": {"prompt": "a lake"}, "usd": 0.004,
-           "submitted": "2026-10-30T10:00:00"}
+    job = {
+        "model": "a/b",
+        "prompt": "a lake",
+        "payload": {"prompt": "a lake"},
+        "usd": 0.004,
+        "submitted": "2026-10-30T10:00:00",
+    }
     result = {"request_id": "r1", "images": [{"url": "https://cdn/x.png"}]}
 
     paths = hf.save_outputs(result, job, tmp_path / "out")
@@ -425,37 +448,55 @@ def test_save_outputs_writes_sidecar_and_logs_files(tmp_path, monkeypatch):
 
 def test_spend_adds_up_finished_jobs(history_file, no_env_file, capsys):
     today = date.today().isoformat()
-    history_file.write_text(json.dumps({
-        "old": "a/b",
-        "r1": {"model": "img", "usd": 0.004, "status": "completed", "submitted": f"{today}T09:00:00"},
-        "r2": {"model": "vid", "usd": 0.4, "status": "completed", "submitted": f"{today}T10:00:00"},
-        "r3": {"model": "vid", "usd": 0.4, "status": "failed", "submitted": f"{today}T11:00:00"},
-        "r4": {"model": "vid", "usd": 0.4, "status": "in_progress", "submitted": f"{today}T12:00:00"},
-        "r5": {"model": "img", "usd": 1.0, "status": "completed", "submitted": "2020-01-01T09:00:00"},
-    }))
+    history_file.write_text(
+        json.dumps(
+            {
+                "old": "a/b",
+                "r1": {"model": "img", "usd": 0.004, "status": "completed", "submitted": f"{today}T09:00:00"},
+                "r2": {"model": "vid", "usd": 0.4, "status": "completed", "submitted": f"{today}T10:00:00"},
+                "r3": {"model": "vid", "usd": 0.4, "status": "failed", "submitted": f"{today}T11:00:00"},
+                "r4": {"model": "vid", "usd": 0.4, "status": "in_progress", "submitted": f"{today}T12:00:00"},
+                "r5": {"model": "img", "usd": 1.0, "status": "completed", "submitted": "2020-01-01T09:00:00"},
+            }
+        )
+    )
     assert hf.main(["spend", "--days", "1"]) == 0
     assert json.loads(capsys.readouterr().out) == {
-        "since": today, "estimated_usd": 0.404, "by_model": {"vid": 0.4, "img": 0.004},
-        "jobs": 2, "running": 1, "not_charged": 1, "price_unknown": 0, "untracked": 1,
+        "since": today,
+        "estimated_usd": 0.404,
+        "by_model": {"vid": 0.4, "img": 0.004},
+        "jobs": 2,
+        "running": 1,
+        "not_charged": 1,
+        "price_unknown": 0,
+        "untracked": 1,
     }
     hf.main(["spend"])
     assert json.loads(capsys.readouterr().out)["estimated_usd"] == 1.404
 
 
 def test_status_is_recorded_in_job_log(no_env_file, monkeypatch, capsys):
-    monkeypatch.setattr(hf, "make_session", lambda: FakeSession([
-        FakeResponse(200, {"request_id": "r1", "status": "nsfw"}),
-    ]))
+    monkeypatch.setattr(
+        hf,
+        "make_session",
+        lambda: FakeSession(
+            [
+                FakeResponse(200, {"request_id": "r1", "status": "nsfw"}),
+            ]
+        ),
+    )
     hf.main(["status", "r1"])
     assert hf.load_history()["r1"]["status"] == "nsfw"
 
 
 def test_poll_until_done(sleeps):
-    session = FakeSession([
-        FakeResponse(200, {"request_id": "r1", "status": "queued"}),
-        FakeResponse(200, {"request_id": "r1", "status": "in_progress"}),
-        FakeResponse(200, {"request_id": "r1", "status": "completed"}),
-    ])
+    session = FakeSession(
+        [
+            FakeResponse(200, {"request_id": "r1", "status": "queued"}),
+            FakeResponse(200, {"request_id": "r1", "status": "in_progress"}),
+            FakeResponse(200, {"request_id": "r1", "status": "completed"}),
+        ]
+    )
     assert hf.poll_until_done(session, "r1", timeout=600)["status"] == "completed"
     # The wait time grows: first ~2 s, then ~3 s (each plus up to 0.5 s jitter).
     assert 2.0 <= sleeps[0] <= 2.5
@@ -644,9 +685,15 @@ def test_check_api_network_error(monkeypatch):
 
 
 def test_character_status_updates_file(characters_file, no_env_file, monkeypatch, capsys):
-    monkeypatch.setattr(hf, "make_session", lambda: FakeSession([
-        FakeResponse(200, {"id": "ref-123", "status": "in_progress"}),
-    ]))
+    monkeypatch.setattr(
+        hf,
+        "make_session",
+        lambda: FakeSession(
+            [
+                FakeResponse(200, {"id": "ref-123", "status": "in_progress"}),
+            ]
+        ),
+    )
     assert hf.main(["character", "status", "Mila"]) == 0
     assert json.loads(capsys.readouterr().out)["status"] == "in_progress"
     assert hf.load_characters()["Mila"]["status"] == "in_progress"
@@ -671,18 +718,39 @@ def no_env_file(tmp_path, monkeypatch):
 def catalog_files(tmp_path, monkeypatch, models_file):
     """A small catalog plus prices in the temporary folder."""
     catalog_path = tmp_path / "catalog.json"
-    catalog_path.write_text(json.dumps({"updated": "2026-10-30", "models": {
-        "test/image": {"title": "Test Image", "output": "image", "operations": ["text2image"],
-                       "listed": True, "documented": True},
-        "test/video": {"title": "Test Video", "output": "video", "operations": ["image2video"],
-                       "listed": True, "documented": False},
-        "docs/only": {"title": None, "output": None, "operations": [], "listed": False, "documented": True},
-    }}))
+    catalog_path.write_text(
+        json.dumps(
+            {
+                "updated": "2026-10-30",
+                "models": {
+                    "test/image": {
+                        "title": "Test Image",
+                        "output": "image",
+                        "operations": ["text2image"],
+                        "listed": True,
+                        "documented": True,
+                    },
+                    "test/video": {
+                        "title": "Test Video",
+                        "output": "video",
+                        "operations": ["image2video"],
+                        "listed": True,
+                        "documented": False,
+                    },
+                    "docs/only": {"title": None, "output": None, "operations": [], "listed": False, "documented": True},
+                },
+            }
+        )
+    )
     prices_path = tmp_path / "prices.json"
-    prices_path.write_text(json.dumps({
-        "test/image": {"usd": "0.500"},
-        "test/video": {"usd": "0.100"},
-    }))
+    prices_path.write_text(
+        json.dumps(
+            {
+                "test/image": {"usd": "0.500"},
+                "test/video": {"usd": "0.100"},
+            }
+        )
+    )
     monkeypatch.setattr(hf, "CATALOG_FILE", catalog_path)
     monkeypatch.setattr(hf, "PRICES_FILE", prices_path)
 
@@ -717,10 +785,12 @@ def test_models_without_catalog_gives_hint(no_env_file, tmp_path, monkeypatch, c
 
 
 def test_estimate_with_learning_adds_missing_fields(sleeps):
-    session = FakeSession([
-        FakeResponse(400, {"detail": ": 'video_urls' is a required property"}),
-        FakeResponse(200, {"usd": "1.250"}),
-    ])
+    session = FakeSession(
+        [
+            FakeResponse(400, {"detail": ": 'video_urls' is a required property"}),
+            FakeResponse(200, {"usd": "1.250"}),
+        ]
+    )
     entry = hf.estimate_with_learning(session, "m", {"params": {}}, {"prompt": "test"})
     assert entry["usd"] == "1.250"
     assert entry["payload"] == {"prompt": "test", "video_urls": ["https://example.com/input.mp4"]}
@@ -751,19 +821,35 @@ def test_main_error_has_exit_code_and_no_traceback(no_env_file, monkeypatch, cap
 
 
 def test_status_urls(no_env_file, monkeypatch, capsys):
-    monkeypatch.setattr(hf, "make_session", lambda: FakeSession([
-        FakeResponse(200, {"request_id": "r1", "status": "completed", "images": [{"url": "https://cdn/a.png"}]}),
-    ]))
+    monkeypatch.setattr(
+        hf,
+        "make_session",
+        lambda: FakeSession(
+            [
+                FakeResponse(
+                    200, {"request_id": "r1", "status": "completed", "images": [{"url": "https://cdn/a.png"}]}
+                ),
+            ]
+        ),
+    )
     assert hf.main(["status", "r1", "--urls"]) == 0
     assert json.loads(capsys.readouterr().out) == {
-        "request_id": "r1", "status": "completed", "urls": ["https://cdn/a.png"],
+        "request_id": "r1",
+        "status": "completed",
+        "urls": ["https://cdn/a.png"],
     }
 
 
 def test_main_failed_job_returns_exit_code_1(no_env_file, monkeypatch, capsys):
-    monkeypatch.setattr(hf, "make_session", lambda: FakeSession([
-        FakeResponse(200, {"request_id": "r1", "status": "nsfw"}),
-    ]))
+    monkeypatch.setattr(
+        hf,
+        "make_session",
+        lambda: FakeSession(
+            [
+                FakeResponse(200, {"request_id": "r1", "status": "nsfw"}),
+            ]
+        ),
+    )
     assert hf.main(["status", "r1"]) == 1
     assert json.loads(capsys.readouterr().out)["status"] == "nsfw"
 
@@ -776,11 +862,15 @@ def test_gallery_items_skip_missing_files_and_sort_newest_first(history_file, tm
     old_image.write_bytes(b"x")
     new_image = tmp_path / "new.png"
     new_image.write_bytes(b"x")
-    history_file.write_text(json.dumps({
-        "r1": {"model": "a/b", "submitted": "2026-10-29T10:00:00", "files": [str(old_image)]},
-        "r2": {"model": "a/b", "submitted": "2026-10-30T10:00:00", "files": [str(new_image), "/gone.png"]},
-        "r3": {"model": "a/b", "files": ["/gone-too.png"]},
-    }))
+    history_file.write_text(
+        json.dumps(
+            {
+                "r1": {"model": "a/b", "submitted": "2026-10-29T10:00:00", "files": [str(old_image)]},
+                "r2": {"model": "a/b", "submitted": "2026-10-30T10:00:00", "files": [str(new_image), "/gone.png"]},
+                "r3": {"model": "a/b", "files": ["/gone-too.png"]},
+            }
+        )
+    )
     items, missing = hf.gallery_items()
     assert [entry["request_id"] for entry in items] == ["r2", "r1"]
     assert items[0]["files"] == [str(new_image)]
@@ -816,12 +906,23 @@ def test_gallery_no_open(history_file, no_env_file, capsys, browser_calls):
     assert browser_calls == []
 
 
-def test_run_rebuilds_gallery(sleeps, models_file, no_env_file, no_max_usd, tmp_path, monkeypatch, capsys, browser_calls):
+def test_run_rebuilds_gallery(
+    sleeps, models_file, no_env_file, no_max_usd, tmp_path, monkeypatch, capsys, browser_calls
+):
     monkeypatch.setattr(hf, "download_file", lambda url, target: target.write_bytes(b"IMG"))
-    monkeypatch.setattr(hf, "make_session", lambda: FakeSession([
-        ESTIMATE_OK, SUBMIT_OK,
-        FakeResponse(200, {"request_id": "r42", "status": "completed", "images": [{"url": "https://cdn/x.png"}]}),
-    ]))
+    monkeypatch.setattr(
+        hf,
+        "make_session",
+        lambda: FakeSession(
+            [
+                ESTIMATE_OK,
+                SUBMIT_OK,
+                FakeResponse(
+                    200, {"request_id": "r42", "status": "completed", "images": [{"url": "https://cdn/x.png"}]}
+                ),
+            ]
+        ),
+    )
     assert hf.main(["run", "test/image", "--prompt", "a lake", "--out", str(tmp_path / "out"), "--open"]) == 0
     assert json.loads(capsys.readouterr().out)["usd"] == 0.25
     assert "a lake" in (tmp_path / "gallery.html").read_text()
@@ -834,8 +935,10 @@ def test_run_rebuilds_gallery(sleeps, models_file, no_env_file, no_max_usd, tmp_
 def many_session(*poll_results, usd="0.040"):
     """Responses for run_many: one estimate per job, then one submit per job, then one poll per job."""
     estimates = [FakeResponse(200, {"usd": usd}) for _ in poll_results]
-    submits = [FakeResponse(200, {"request_id": f"v{number}", "status": "queued"})
-               for number, _ in enumerate(poll_results, start=1)]
+    submits = [
+        FakeResponse(200, {"request_id": f"v{number}", "status": "queued"})
+        for number, _ in enumerate(poll_results, start=1)
+    ]
     return FakeSession(estimates + submits + [FakeResponse(200, body) for body in poll_results])
 
 
@@ -849,8 +952,20 @@ def test_character_views_creates_selected_views(sleeps, no_env_file, no_max_usd,
     )
     monkeypatch.setattr(hf, "make_session", lambda: session)
 
-    code = hf.main(["character", "views", "https://x/base.png", "--views", "profile-left", "smiling",
-                    "--details", "green eyes", "--out", str(tmp_path / "out")])
+    code = hf.main(
+        [
+            "character",
+            "views",
+            "https://x/base.png",
+            "--views",
+            "profile-left",
+            "smiling",
+            "--details",
+            "green eyes",
+            "--out",
+            str(tmp_path / "out"),
+        ]
+    )
 
     output = json.loads(capsys.readouterr().out)
     assert code == 1
@@ -896,8 +1011,7 @@ def fake_ffmpeg(monkeypatch):
 def test_find_video_by_path_or_request_id(history_file, tmp_path):
     clip = tmp_path / "clip.mp4"
     clip.write_bytes(b"x")
-    history_file.write_text(json.dumps({"r1": {"files": [str(tmp_path / "x.png"), str(clip)]},
-                                        "r2": {"files": []}}))
+    history_file.write_text(json.dumps({"r1": {"files": [str(tmp_path / "x.png"), str(clip)]}, "r2": {"files": []}}))
     assert hf.find_video(str(clip)) == clip
     assert hf.find_video("r1") == clip
     with pytest.raises(hf.CliError, match="hf download r2"):
@@ -910,7 +1024,9 @@ def test_build_payload_from_last_frame(models_file, fake_ffmpeg, tmp_path, monke
     clip = tmp_path / "clip.mp4"
     clip.write_bytes(b"x")
     uploaded = []
-    monkeypatch.setattr(hf, "resolve_input_url", lambda value, session=None: uploaded.append(value) or "https://cdn/f.png")
+    monkeypatch.setattr(
+        hf, "resolve_input_url", lambda value, session=None: uploaded.append(value) or "https://cdn/f.png"
+    )
 
     payload = hf.build_payload(generation_args(from_last_frame=str(clip)))
 
@@ -945,8 +1061,9 @@ def test_concat_joins_clips_and_logs_local_job(fake_ffmpeg, no_env_file, tmp_pat
 
 
 def test_spend_ignores_local_jobs(history_file, no_env_file, capsys):
-    history_file.write_text(json.dumps({"concat-1": {"kind": "local", "submitted": "2026-10-30T10:00:00",
-                                                     "status": "completed"}}))
+    history_file.write_text(
+        json.dumps({"concat-1": {"kind": "local", "submitted": "2026-10-30T10:00:00", "status": "completed"}})
+    )
     hf.main(["spend"])
     output = json.loads(capsys.readouterr().out)
     assert output["jobs"] == 0 and output["price_unknown"] == 0
@@ -968,10 +1085,13 @@ def write_batch(tmp_path, *lines) -> Path:
 
 
 def test_read_batch_file(tmp_path, models_file):
-    path = write_batch(tmp_path,
-                       "# a comment", "",
-                       '{"prompt": "a lake", "params": {"duration": 5, "aspect_ratio": "16:9", "seed": "7"}}',
-                       '{"model": "other/model", "prompt": "a cabin"}')
+    path = write_batch(
+        tmp_path,
+        "# a comment",
+        "",
+        '{"prompt": "a lake", "params": {"duration": 5, "aspect_ratio": "16:9", "seed": "7"}}',
+        '{"model": "other/model", "prompt": "a cabin"}',
+    )
     jobs = hf.read_batch_file(path, "test/image")
     assert [job.model_id for job in jobs] == ["test/image", "other/model"]
     payload = hf.build_payload(jobs[0])
@@ -981,12 +1101,15 @@ def test_read_batch_file(tmp_path, models_file):
     assert payload["seed"] == "7"
 
 
-@pytest.mark.parametrize("line, message", [
-    ('{"prompt": "x", "colour": "red"}', "unknown field"),
-    ('{"params": {}}', "'prompt' and 'model'"),
-    ('not json', "not valid JSON"),
-    ('["a list"]', "JSON object"),
-])
+@pytest.mark.parametrize(
+    "line, message",
+    [
+        ('{"prompt": "x", "colour": "red"}', "unknown field"),
+        ('{"params": {}}', "'prompt' and 'model'"),
+        ("not json", "not valid JSON"),
+        ('["a list"]', "JSON object"),
+    ],
+)
 def test_read_batch_file_errors(tmp_path, line, message):
     with pytest.raises(hf.CliError, match=message):
         hf.read_batch_file(write_batch(tmp_path, line), "test/image")
@@ -1024,11 +1147,15 @@ def test_batch_per_job_limit_from_environment(no_env_file, models_file, tmp_path
 
 def test_batch_runs_all_jobs(sleeps, no_env_file, no_max_usd, models_file, tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(hf, "download_file", lambda url, target: target.write_bytes(b"IMG"))
-    monkeypatch.setattr(hf, "make_session", lambda: many_session(
-        {"request_id": "v1", "status": "completed", "images": [{"url": "https://cdn/1.png"}]},
-        {"request_id": "v2", "status": "completed", "images": [{"url": "https://cdn/2.png"}]},
-        usd="0.004",
-    ))
+    monkeypatch.setattr(
+        hf,
+        "make_session",
+        lambda: many_session(
+            {"request_id": "v1", "status": "completed", "images": [{"url": "https://cdn/1.png"}]},
+            {"request_id": "v2", "status": "completed", "images": [{"url": "https://cdn/2.png"}]},
+            usd="0.004",
+        ),
+    )
     path = write_batch(tmp_path, '{"prompt": "a"}', '{"prompt": "b"}')
 
     assert hf.main(["batch", str(path), "--model", "test/image", "--out", str(tmp_path / "out")]) == 0
