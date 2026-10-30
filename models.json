@@ -1,0 +1,25 @@
+{
+  "higgsfield-ai/soul/standard": {
+    "type": "text-to-image",
+    "output": "images",
+    "defaults": {"aspect_ratio": "4:3"},
+    "tested": false,
+    "notes": "Doku widerspricht sich bei resolution (2K/4K vs. 720p) – im Testlauf klären."
+  },
+  "minimax/hailuo-2.3/standard/image-to-video": {
+    "type": "image-to-video",
+    "output": "video",
+    "defaults": {"duration": 6},
+    "required": ["prompt", "image_url"],
+    "tested": false,
+    "notes": "duration: 6 oder 10"
+  },
+  "kling-video/v2.5-turbo/standard/image-to-video": {
+    "type": "image-to-video",
+    "output": "video",
+    "defaults": {"duration": 5},
+    "required": ["prompt", "image_url"],
+    "tested": false,
+    "notes": "duration: 5 oder 10; optional negative_prompt, cfg_scale"
+  }
+}

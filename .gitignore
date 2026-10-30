@@ -1,0 +1,13 @@
+# Geheimnisse
+.env
+.env.*
+!.env.example
+
+# Erzeugte Dateien
+outputs/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
