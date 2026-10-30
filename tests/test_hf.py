@@ -411,6 +411,16 @@ def test_main_error_has_exit_code_and_no_traceback(no_env_file, monkeypatch, cap
     assert "Traceback" not in captured.err
 
 
+def test_status_urls(no_env_file, monkeypatch, capsys):
+    monkeypatch.setattr(hf, "make_session", lambda: FakeSession([
+        FakeResponse(200, {"request_id": "r1", "status": "completed", "images": [{"url": "https://cdn/a.png"}]}),
+    ]))
+    assert hf.main(["status", "r1", "--urls"]) == 0
+    assert json.loads(capsys.readouterr().out) == {
+        "request_id": "r1", "status": "completed", "urls": ["https://cdn/a.png"],
+    }
+
+
 def test_main_failed_job_returns_exit_code_1(no_env_file, monkeypatch, capsys):
     monkeypatch.setattr(hf, "make_session", lambda: FakeSession([
         FakeResponse(200, {"request_id": "r1", "status": "nsfw"}),

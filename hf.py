@@ -414,7 +414,13 @@ def cmd_submit(args: argparse.Namespace) -> dict:
 
 def cmd_status(args: argparse.Namespace) -> dict:
     result = api_request(make_session(), "GET", f"/requests/{args.request_id}/status")
-    return result if args.verbose else compact_status(result)
+    if args.verbose:
+        return result
+    output = compact_status(result)
+    if args.urls:
+        # Öffentliche Ergebnis-URLs, z. B. als --image-url für Bild-zu-Video (7 Tage gültig).
+        output["urls"] = [url for _, url in extract_outputs(result)]
+    return output
 
 
 def cmd_wait(args: argparse.Namespace) -> dict:
@@ -617,6 +623,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("status", parents=[common], help="Status eines Jobs")
     p.add_argument("request_id")
+    p.add_argument("--urls", action="store_true", help="auch die Ergebnis-URLs ausgeben")
     p.set_defaults(func=cmd_status)
 
     p = sub.add_parser("wait", parents=[common], help="warten, bis ein Job fertig ist")
