@@ -319,6 +319,82 @@ def test_poll_until_done_timeout(sleeps, monkeypatch):
         hf.poll_until_done(session, "r1", timeout=150)
 
 
+# --- Upload und Cancel ------------------------------------------------------
+
+
+UPLOAD_ANSWER = {
+    "public_url": "https://cdn/input/x.png",
+    "upload_url": "https://storage/presigned",
+    "upload_headers": {"Content-Type": "image/png", "x-amz-tagging": "retention=temporary"},
+}
+
+
+@pytest.fixture
+def fake_put(monkeypatch):
+    """Ersetzt requests.put und merkt sich, was hochgeladen wurde."""
+    calls = []
+
+    def put(url, data=None, headers=None, timeout=None):
+        calls.append({"url": url, "data": data, "headers": headers})
+        return FakeResponse(200)
+
+    monkeypatch.setattr(hf.requests, "put", put)
+    return calls
+
+
+def test_upload_file(tmp_path, fake_put, sleeps):
+    image = tmp_path / "foto.png"
+    image.write_bytes(b"PNGDATA")
+    session = FakeSession([FakeResponse(200, UPLOAD_ANSWER)])
+
+    assert hf.upload_file(session, image) == "https://cdn/input/x.png"
+    assert session.calls[0]["json"] == {"content_type": "image/png"}
+    assert fake_put[0]["url"] == "https://storage/presigned"
+    assert fake_put[0]["data"] == b"PNGDATA"
+    # Die vorgegebenen Header werden mitgeschickt, aber nie unsere Zugangsdaten.
+    assert fake_put[0]["headers"]["x-amz-tagging"] == "retention=temporary"
+    assert "Authorization" not in fake_put[0]["headers"]
+
+
+def test_upload_rejects_unsupported_type(tmp_path):
+    document = tmp_path / "brief.pdf"
+    document.write_bytes(b"%PDF")
+    with pytest.raises(hf.CliError, match="nicht unterstützt"):
+        hf.upload_file(FakeSession([]), document)
+
+
+def test_upload_missing_file(tmp_path):
+    with pytest.raises(hf.CliError, match="nicht gefunden"):
+        hf.upload_file(FakeSession([]), tmp_path / "gibt-es-nicht.jpg")
+
+
+def test_resolve_input_url_keeps_urls():
+    # Eine leere FakeSession würde bei jedem Aufruf scheitern – es darf keiner passieren.
+    assert hf.resolve_input_url("https://x/a.jpg", FakeSession([])) == "https://x/a.jpg"
+
+
+def test_resolve_input_url_uploads_local_files(tmp_path, fake_put, sleeps):
+    image = tmp_path / "foto.jpg"
+    image.write_bytes(b"JPG")
+    session = FakeSession([FakeResponse(200, UPLOAD_ANSWER)])
+    assert hf.resolve_input_url(str(image), session) == "https://cdn/input/x.png"
+    assert session.calls[0]["json"] == {"content_type": "image/jpeg"}
+
+
+def test_cancel_success(no_env_file, monkeypatch, capsys):
+    session = FakeSession([FakeResponse(202)])
+    monkeypatch.setattr(hf, "make_session", lambda: session)
+    assert hf.main(["cancel", "r1"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"request_id": "r1", "status": "canceled"}
+    assert session.calls[0]["url"].endswith("/requests/r1/cancel")
+
+
+def test_cancel_running_job(no_env_file, monkeypatch, capsys):
+    monkeypatch.setattr(hf, "make_session", lambda: FakeSession([FakeResponse(400, {"detail": "started"})]))
+    assert hf.main(["cancel", "r1"]) == 1
+    assert "läuft bereits" in json.loads(capsys.readouterr().out)["error"]
+
+
 # --- main: Ausgabe und Exit-Codes -------------------------------------------
 
 

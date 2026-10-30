@@ -6,6 +6,7 @@ die Ausgabe leicht lesen kann. Mit --verbose gibt es mehr Details.
 
 import argparse
 import json
+import mimetypes
 import os
 import random
 import sys
@@ -51,6 +52,10 @@ RETRY_STATUS_CODES = {429, 500, 502, 503, 504}
 # Polling laut Doku: mit 2 s beginnen, langsam bis 10 s steigern.
 POLL_START_DELAY = 2.0
 POLL_MAX_DELAY = 10.0
+# Dateitypen, die der Upload laut Doku annimmt.
+UPLOAD_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif", "audio/wav", "audio/x-wav", "video/mp4"}
+# Uploads großer Videos dürfen länger dauern als normale API-Aufrufe.
+UPLOAD_TIMEOUT = 300
 # Dateiendungen, falls die URL keine verrät.
 FALLBACK_EXTENSIONS = {"images": ".jpg", "video": ".mp4", "audio": ".mp3", "audios": ".mp3"}
 
@@ -184,7 +189,7 @@ def build_payload(args: argparse.Namespace) -> dict:
     payload = dict(model_info.get("defaults", {}))
     payload["prompt"] = args.prompt
     if args.image_url:
-        payload["image_url"] = args.image_url
+        payload["image_url"] = resolve_input_url(args.image_url)
     for text in args.param:
         key, value = parse_param(text)
         payload[key] = value
@@ -294,6 +299,61 @@ def download_file(url: str, target: Path) -> None:
             if attempt == MAX_ATTEMPTS:
                 raise CliError(f"Download fehlgeschlagen: {type(error).__name__}")
             time.sleep(retry_delay(attempt))
+
+
+# --- Upload -----------------------------------------------------------------
+
+
+def guess_content_type(path: Path) -> str:
+    """Ermittelt den Dateityp anhand der Endung, z. B. .jpg -> image/jpeg."""
+    # guess_type liefert ein Tupel (typ, kodierung) – die Kodierung brauchen wir nicht.
+    content_type, _ = mimetypes.guess_type(path.name)
+    if content_type not in UPLOAD_CONTENT_TYPES:
+        allowed = ", ".join(sorted(UPLOAD_CONTENT_TYPES))
+        raise CliError(f"Dateityp von '{path.name}' wird nicht unterstützt ({content_type}). Erlaubt: {allowed}")
+    return content_type
+
+
+def upload_file(session: requests.Session, path: Path) -> str:
+    """Lädt eine lokale Datei zu Higgsfield hoch und gibt die öffentliche URL zurück.
+
+    Ablauf laut Doku:
+    1. Bei der API eine vorsignierte Upload-URL anfordern.
+    2. Die Datei per PUT direkt an den Speicher schicken – mit genau den
+       Headern aus der Antwort und OHNE unsere Zugangsdaten.
+    3. Die public_url als image_url/video_url in der Generierung verwenden.
+    """
+    if not path.is_file():
+        raise CliError(f"Datei nicht gefunden: {path}")
+    content_type = guess_content_type(path)
+    upload = api_request(session, "POST", "/files/generate-upload-url",
+                         json_body={"content_type": content_type})
+
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        try:
+            # requests.put statt session.put: kein Authorization-Header an den Speicher.
+            response = requests.put(upload["upload_url"], data=path.read_bytes(),
+                                    headers=upload.get("upload_headers", {}), timeout=UPLOAD_TIMEOUT)
+        except (requests.ConnectionError, requests.Timeout) as error:
+            if attempt == MAX_ATTEMPTS:
+                raise CliError(f"Upload fehlgeschlagen: {type(error).__name__}")
+            time.sleep(retry_delay(attempt))
+            continue
+        if response.status_code in RETRY_STATUS_CODES and attempt < MAX_ATTEMPTS:
+            time.sleep(retry_delay(attempt))
+            continue
+        if response.status_code >= 400:
+            raise CliError(f"Upload fehlgeschlagen: HTTP {response.status_code}")
+        return upload["public_url"]
+    raise CliError("Unerwarteter Fehler in upload_file.")
+
+
+def resolve_input_url(value: str, session: requests.Session | None = None) -> str:
+    """Gibt URLs unverändert zurück, lädt lokale Dateien vorher hoch."""
+    if value.startswith(("http://", "https://")):
+        return value
+    # expanduser() macht aus "~/Bilder/x.jpg" einen vollständigen Pfad.
+    return upload_file(session or make_session(), Path(value).expanduser())
 
 
 # --- Ergebnisse -------------------------------------------------------------
@@ -421,6 +481,21 @@ def cmd_status(args: argparse.Namespace) -> dict:
         # Öffentliche Ergebnis-URLs, z. B. als --image-url für Bild-zu-Video (7 Tage gültig).
         output["urls"] = [url for _, url in extract_outputs(result)]
     return output
+
+
+def cmd_upload(args: argparse.Namespace) -> dict:
+    return {"file": str(args.file), "url": upload_file(make_session(), args.file)}
+
+
+def cmd_cancel(args: argparse.Namespace) -> dict:
+    try:
+        api_request(make_session(), "POST", f"/requests/{args.request_id}/cancel")
+    except CliError as error:
+        if str(error).startswith("HTTP 400"):
+            # Laut Doku: 400 heißt, der Job läuft bereits und kann nicht mehr abgebrochen werden.
+            raise CliError(f"Job {args.request_id} läuft bereits und kann nicht mehr abgebrochen werden.")
+        raise
+    return {"request_id": args.request_id, "status": "canceled"}
 
 
 def cmd_wait(args: argparse.Namespace) -> dict:
@@ -609,7 +684,7 @@ def build_parser() -> argparse.ArgumentParser:
     generation = argparse.ArgumentParser(add_help=False)
     generation.add_argument("model_id", help="z. B. higgsfield-ai/soul/standard")
     generation.add_argument("--prompt", required=True)
-    generation.add_argument("--image-url", help="Eingabebild für Bild-zu-Video")
+    generation.add_argument("--image-url", help="Eingabebild: URL oder lokale Datei (wird hochgeladen)")
     generation.add_argument(
         "--param", action="append", default=[], metavar="KEY=VALUE",
         help="weiterer Modellparameter, mehrfach erlaubt",
@@ -625,6 +700,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("request_id")
     p.add_argument("--urls", action="store_true", help="auch die Ergebnis-URLs ausgeben")
     p.set_defaults(func=cmd_status)
+
+    p = sub.add_parser("cancel", parents=[common], help="Job abbrechen (nur solange 'queued')")
+    p.add_argument("request_id")
+    p.set_defaults(func=cmd_cancel)
+
+    p = sub.add_parser("upload", parents=[common], help="lokale Datei hochladen, gibt öffentliche URL aus")
+    p.add_argument("file", type=Path)
+    p.set_defaults(func=cmd_upload)
 
     p = sub.add_parser("wait", parents=[common], help="warten, bis ein Job fertig ist")
     p.add_argument("request_id")
