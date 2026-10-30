@@ -7,6 +7,7 @@ prepared responses. time.sleep is replaced so that nothing waits.
 import argparse
 import json
 from datetime import date
+from pathlib import Path
 
 import pytest
 import requests
@@ -129,7 +130,8 @@ def test_parse_param_without_equals_sign():
 def generation_args(**overrides) -> argparse.Namespace:
     """Arguments as from 'submit'/'run'; individual fields can be overridden."""
     values = {"model_id": "test/image", "prompt": "p", "image_url": None,
-              "image_urls": None, "character": None, "param": [], "max_usd": None}
+              "image_urls": None, "character": None, "param": [], "max_usd": None,
+              "from_last_frame": None}
     values.update(overrides)
     return argparse.Namespace(**values)
 
@@ -873,3 +875,84 @@ def test_character_views_checks_total_budget(sleeps, no_env_file, no_max_usd, tm
     assert hf.main(["character", "views", "https://x/base.png", "--max-usd", "0.1"]) == 1
     assert "$0.200" in json.loads(capsys.readouterr().out)["error"]
     assert len(session.calls) == 1
+
+
+# --- Chaining clips (ffmpeg) ------------------------------------------------
+
+
+@pytest.fixture
+def fake_ffmpeg(monkeypatch):
+    """Replaces ffmpeg: records the arguments and creates the output file (the last argument)."""
+    calls = []
+
+    def run(arguments):
+        calls.append(arguments)
+        Path(arguments[-1]).write_bytes(b"FAKE")
+
+    monkeypatch.setattr(hf, "run_ffmpeg", run)
+    return calls
+
+
+def test_find_video_by_path_or_request_id(history_file, tmp_path):
+    clip = tmp_path / "clip.mp4"
+    clip.write_bytes(b"x")
+    history_file.write_text(json.dumps({"r1": {"files": [str(tmp_path / "x.png"), str(clip)]},
+                                        "r2": {"files": []}}))
+    assert hf.find_video(str(clip)) == clip
+    assert hf.find_video("r1") == clip
+    with pytest.raises(hf.CliError, match="hf download r2"):
+        hf.find_video("r2")
+    with pytest.raises(hf.CliError, match="Video not found"):
+        hf.find_video("nothing")
+
+
+def test_build_payload_from_last_frame(models_file, fake_ffmpeg, tmp_path, monkeypatch):
+    clip = tmp_path / "clip.mp4"
+    clip.write_bytes(b"x")
+    uploaded = []
+    monkeypatch.setattr(hf, "resolve_input_url", lambda value, session=None: uploaded.append(value) or "https://cdn/f.png")
+
+    payload = hf.build_payload(generation_args(from_last_frame=str(clip)))
+
+    assert payload["image_url"] == "https://cdn/f.png"
+    assert uploaded == [str(tmp_path / "clip_last.png")]
+    assert fake_ffmpeg[0][:3] == ["-sseof", "-0.5", "-i"]
+
+
+def test_build_payload_rejects_image_url_and_last_frame(models_file):
+    with pytest.raises(hf.CliError, match="either --image-url or --from-last-frame"):
+        hf.build_payload(generation_args(image_url="https://x/a.jpg", from_last_frame="clip.mp4"))
+
+
+def test_concat_list_quotes_paths():
+    assert hf.concat_list([Path("/a/b.mp4"), Path("/a/it's.mp4")]) == "file '/a/b.mp4'\nfile '/a/it'\\''s.mp4'\n"
+
+
+def test_concat_joins_clips_and_logs_local_job(fake_ffmpeg, no_env_file, tmp_path, capsys):
+    clips = []
+    for name in ("a.mp4", "b.mp4"):
+        clips.append(tmp_path / name)
+        clips[-1].write_bytes(b"x")
+    target = tmp_path / "scene.mp4"
+
+    assert hf.main(["concat", str(clips[0]), str(clips[1]), "--out-file", str(target)]) == 0
+
+    assert json.loads(capsys.readouterr().out) == {"file": str(target), "clips": 2}
+    assert fake_ffmpeg[0][:2] == ["-f", "concat"]
+    (job,) = hf.load_history().values()
+    assert job["kind"] == "local"
+    assert job["files"] == [str(target.resolve())]
+
+
+def test_spend_ignores_local_jobs(history_file, no_env_file, capsys):
+    history_file.write_text(json.dumps({"concat-1": {"kind": "local", "submitted": "2026-10-30T10:00:00",
+                                                     "status": "completed"}}))
+    hf.main(["spend"])
+    output = json.loads(capsys.readouterr().out)
+    assert output["jobs"] == 0 and output["price_unknown"] == 0
+
+
+def test_concat_needs_two_clips(no_env_file, tmp_path, capsys):
+    clip = tmp_path / "a.mp4"
+    clip.write_bytes(b"x")
+    assert hf.main(["concat", str(clip)]) == 1

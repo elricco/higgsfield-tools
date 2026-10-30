@@ -16,6 +16,7 @@ Only read when needed. The short version is in [SKILL.md](SKILL.md).
 | `wait <request_id> [--timeout 600]` | final status; polling 2 s → 10 s |
 | `download <request_id> [--out outputs]` | `{"request_id", "status", "files": [...]}` |
 | `run <model_id> --prompt ... [--max-usd USD] [--timeout] [--out]` | like `download` plus `"usd"` |
+| `concat <clips...> [--out-file PATH] [--open]` | `{"file", "clips"}`; joins videos (files or request_ids) with ffmpeg, free |
 | `gallery [--scan FOLDER] [--no-open]` | `{"file", "jobs", "missing_files", ["added_files"]}`; writes `gallery.html` and opens it |
 | `spend [--days N]` | `{"since", "estimated_usd", "by_model", "jobs", "running", "not_charged", "price_unknown", "untracked"}` |
 | `catalog update [--docs-file PATH]` | builds `catalog.json` from `GET /models` + docs |
@@ -26,7 +27,8 @@ Only read when needed. The short version is in [SKILL.md](SKILL.md).
 | `character add <name> <id>` | register an existing ID locally (checks it for free) |
 | `doctor` | checks credentials, API, docs, catalog age |
 
-Additional generation options: `--image-urls A B ...` (edit models), `--character <name>` (SOUL).
+Additional generation options: `--image-urls A B ...` (edit models), `--character <name>` (SOUL),
+`--from-last-frame <video or request_id>` (last frame as `image_url`, needs ffmpeg).
 
 `--param` reads values as JSON: `duration=5` → number, `enhance_prompt=true` → bool, `aspect_ratio=16:9` → text.
 Order in the body: defaults from `models.json` → `--prompt`/`--image-url` → `--param`.
@@ -82,5 +84,5 @@ General experience, only the Kling example is tested here.
 
 **Consistency across several clips**
 - Reuse the same style wording in all prompts.
-- Start clip N+1 from the last frame of clip N (`ffmpeg -sseof -0.1 -i clip.mp4 -frames:v 1 last.png`, then `--image-url last.png`) or from the same start image.
+- Start clip N+1 from the last frame of clip N (`--from-last-frame <clip N>`) or from the same start image; join with `hf concat`.
 - Use models with `first-last-frame` or `reference-to-video` when start and end are fixed.

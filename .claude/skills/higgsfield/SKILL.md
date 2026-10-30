@@ -63,6 +63,14 @@ hf run kling-video/v2.5-turbo/standard/image-to-video --prompt "<motion>" --imag
 
 Result URLs are valid for 7 days.
 
+**Longer scenes (several clips):** continue each clip from the last frame of the previous one, then join them:
+```bash
+hf run <video model> --prompt "<motion 2>" --from-last-frame <request_id or file of clip 1> --param duration=5 --max-usd <price>
+hf concat <clip 1> <clip 2> ...      # request_ids or files, free, needs ffmpeg
+```
+`--from-last-frame` saves `<clip>_last.png` next to the video and uploads it. `concat` copies without re-encoding,
+so all clips must come from the same model with the same settings (Kling 4.0 has sound, 2.5 has none).
+
 **Local files:** `--image-url` also accepts a path (`./photo.jpg`, `~/Pictures/x.png`) – the CLI uploads the
 file automatically (jpg, png, webp, gif). Only get the URL: `hf upload <file>`.
 
@@ -96,7 +104,7 @@ partly wins against the prompt ("hair loose") – vary the desired hairstyles in
 - **Image:** subject → setting → light → style/camera. *"A quiet alpine lake at sunrise, low mist, editorial photography"*
 - **Video from image:** describe only the **motion**, not the image again: camera + subject motion + atmosphere.
   *"slow camera push in over the misty lake, gentle ripples on the water, drifting fog"* (tested ✓)
-- **Consistency across several clips:** same start image or the last frame of the previous clip, same style words, one camera move per clip.
+- **Consistency across several clips:** `--from-last-frame` of the previous clip, same style words, one camera move per clip.
 
 More in [reference.md](reference.md): all commands, error messages, API details, detailed prompt patterns.
 

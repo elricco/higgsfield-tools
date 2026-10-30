@@ -68,6 +68,10 @@ hf download <request_id>
 # Bild → Video, auch mit lokaler Datei
 hf run kling-video/v2.5-turbo/standard/image-to-video --prompt "slow camera push in" --image-url ./foto.jpg
 
+# Vom letzten Bild dieses Clips weitermachen, dann beide zusammenfügen (braucht ffmpeg)
+hf run kling-video/v2.5-turbo/standard/image-to-video --prompt "the camera keeps drifting" --from-last-frame <request_id>
+hf concat <request_id_1> <request_id_2>
+
 # Wiederkehrender Charakter
 hf character views basis.png --details "dark curly hair tied back, green eyes" --max-usd 0.20
 hf character create Mila basis.png outputs/*.png --model-version v2 --max-usd 2.50
@@ -98,14 +102,16 @@ Neben jeder heruntergeladenen Datei liegt eine `.json` mit Prompt, Parametern, M
 | `download <request_id> [--out outputs]` | Dateien speichern |
 | `run <model> --prompt ... [--max-usd USD]` | submit + wait + download |
 | `spend [--days N]` | geschätzte Kosten aus dem Job-Logbuch, je Modell |
+| `concat <clips...> [--out-file PFAD]` | Clips (Dateien oder request_ids) per ffmpeg zu einem Video verbinden, kostenlos |
 | `gallery [--scan ORDNER] [--no-open]` | HTML-Übersicht aller Ergebnisse, öffnet im Browser |
 | `cancel <request_id>` | Job abbrechen, solange er `queued` ist |
 | `upload <datei>` | lokale Datei hochladen, gibt öffentliche URL aus |
 | `character views\|create\|status\|list\|add` | Trainingsansichten erzeugen, Soul-ID-Charaktere trainieren und verwalten |
 | `doctor` | Einrichtung prüfen: Zugangsdaten, API, Doku, Katalog |
 
-Generierungen kennen außerdem `--image-urls A B ...` (Edit-Modelle; lokale Dateien werden hochgeladen) und
-`--character <Name>` (SOUL mit trainiertem Charakter).
+Generierungen kennen außerdem `--image-urls A B ...` (Edit-Modelle; lokale Dateien werden hochgeladen),
+`--character <Name>` (SOUL mit trainiertem Charakter) und `--from-last-frame <Video oder request_id>`
+(setzt einen Clip am letzten Bild fort, braucht ffmpeg).
 
 `run` und `download` bauen die Galerie nach jedem Download neu; mit `--open` wird sie auch geöffnet.
 

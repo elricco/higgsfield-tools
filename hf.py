@@ -9,7 +9,10 @@ import json
 import mimetypes
 import os
 import random
+import shutil
+import subprocess
 import sys
+import tempfile
 import time
 import traceback
 import uuid
@@ -242,8 +245,14 @@ def build_payload(args: argparse.Namespace) -> dict:
     # dict(...) creates a copy so that we do not modify the loaded defaults.
     payload = dict(model_info.get("defaults", {}))
     payload["prompt"] = args.prompt
+    if args.image_url and args.from_last_frame:
+        raise CliError("Use either --image-url or --from-last-frame, not both.")
     if args.image_url:
         payload["image_url"] = resolve_input_url(args.image_url)
+    if args.from_last_frame:
+        video = find_video(args.from_last_frame)
+        frame = extract_last_frame(video, video.with_name(video.stem + "_last.png"))
+        payload["image_url"] = resolve_input_url(str(frame))
     if args.image_urls:
         # A "list comprehension": applies resolve_input_url to every element.
         payload["image_urls"] = [resolve_input_url(value) for value in args.image_urls]
@@ -414,6 +423,78 @@ def resolve_input_url(value: str, session: requests.Session | None = None) -> st
         return value
     # expanduser() turns "~/Pictures/x.jpg" into a full path.
     return upload_file(session or make_session(), Path(value).expanduser())
+
+
+# --- Video helpers (ffmpeg) -------------------------------------------------
+
+
+def find_video(value: str) -> Path:
+    """A video file path, or the downloaded video of a job in the log (by request_id)."""
+    path = Path(value).expanduser()
+    if path.is_file():
+        return path
+    job = load_history().get(value)
+    if job is None:
+        raise CliError(f"Video not found: {value}")
+    for file in job.get("files", []):
+        if gallery.media_kind(file) == "video" and Path(file).is_file():
+            return Path(file)
+    raise CliError(f"Job {value} has no downloaded video. Run 'hf download {value}' first.")
+
+
+def run_ffmpeg(arguments: list[str]) -> None:
+    """Runs ffmpeg and turns a failure into a short CliError."""
+    # shutil.which looks for a program on the PATH, like 'which' in the terminal.
+    if shutil.which("ffmpeg") is None:
+        raise CliError("ffmpeg not found. Install it, e.g. 'brew install ffmpeg'.")
+    # capture_output keeps ffmpeg's long log out of our one-line JSON output.
+    completed = subprocess.run(["ffmpeg", "-y", "-loglevel", "error", *arguments],
+                               capture_output=True, text=True)
+    if completed.returncode != 0:
+        # [-300:] keeps only the end of the message, where the actual error is.
+        raise CliError(f"ffmpeg failed: {completed.stderr.strip()[-300:]}")
+
+
+def extract_last_frame(video: Path, target: Path) -> Path:
+    """Saves the last frame of a video as an image."""
+    # -sseof -0.5 starts reading 0.5 s before the end; -update 1 keeps overwriting
+    # the same image, so at the end it holds the very last frame.
+    run_ffmpeg(["-sseof", "-0.5", "-i", str(video), "-update", "1", str(target)])
+    if not target.is_file():
+        raise CliError(f"ffmpeg did not create {target.name}.")
+    return target
+
+
+def concat_list(clips: list[Path]) -> str:
+    """The file list for ffmpeg's concat demuxer: one "file '<path>'" line per clip."""
+    # A ' inside the path has to be written as '\'' so the quoting stays intact.
+    return "".join("file '" + str(clip).replace("'", "'\\''") + "'\n" for clip in clips)
+
+
+def cmd_concat(args: argparse.Namespace) -> dict:
+    clips = [find_video(value).resolve() for value in args.clips]
+    if len(clips) < 2:
+        raise CliError("concat needs at least two clips.")
+    now = datetime.now()
+    target = args.out_file or Path("outputs") / f"{now:%Y-%m-%d_%H%M%S}_concat.mp4"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    # delete=False: we close the file first so ffmpeg can read it, then remove it ourselves.
+    with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8") as listing:
+        listing.write(concat_list(clips))
+    try:
+        # -c copy joins without re-encoding: fast and lossless, but all clips need the same format.
+        run_ffmpeg(["-f", "concat", "-safe", "0", "-i", listing.name, "-c", "copy", str(target)])
+    except CliError as error:
+        raise CliError(f"{error} – concat only works for clips with the same model and settings.")
+    finally:
+        os.unlink(listing.name)
+    # kind "local": shows up in the gallery, but 'hf spend' ignores it (nothing was paid).
+    update_job(f"concat-{now:%Y%m%d-%H%M%S}", kind="local", model="ffmpeg concat",
+               prompt=f"{len(clips)} clips joined: " + ", ".join(clip.name for clip in clips),
+               submitted=now.isoformat(timespec="seconds"), status="completed",
+               files=[str(target.resolve())])
+    refresh_gallery(args.open)
+    return {"file": str(target), "clips": len(clips)}
 
 
 # --- Characters (Soul ID) ---------------------------------------------------
@@ -694,6 +775,7 @@ def submit_generation(session: requests.Session, args: argparse.Namespace) -> di
         usd=cost["usd"],
         submitted=datetime.now().isoformat(timespec="seconds"),
         status=result.get("status"),
+        **({"from_last_frame": args.from_last_frame} if args.from_last_frame else {}),
     )
     return {**result, "usd": cost["usd"]}
 
@@ -804,7 +886,8 @@ def view_args(view: str, base_url: str, args: argparse.Namespace) -> argparse.Na
     """The arguments for one view, as if typed as 'hf run ...'."""
     prompt = " ".join(part for part in (CHARACTER_VIEWS[view], args.details, VIEWS_KEEP) if part)
     return argparse.Namespace(model_id=args.model, prompt=prompt, image_url=None, image_urls=[base_url],
-                              character=None, param=list(VIEWS_PARAMS), max_usd=None)
+                              character=None, param=list(VIEWS_PARAMS), max_usd=None,
+                              from_last_frame=None)
 
 
 def cmd_character_views(args: argparse.Namespace) -> dict:
@@ -832,6 +915,8 @@ def cmd_spend(args: argparse.Namespace) -> dict:
     by_model = {}
     counts = {"jobs": 0, "running": 0, "not_charged": 0, "price_unknown": 0, "untracked": 0}
     for job in load_history().values():
+        if job.get("kind") == "local":
+            continue  # e.g. concat: made on this machine, nothing was paid
         submitted = job.get("submitted")
         if not submitted:
             # Entries from before the job log existed: no price, no date.
@@ -1131,6 +1216,8 @@ def build_parser() -> argparse.ArgumentParser:
     generation.add_argument("--image-urls", nargs="+", metavar="IMAGE",
                             help="several input images (for edit models), URLs or local files")
     generation.add_argument("--character", help="trained Soul ID character (name or ID)")
+    generation.add_argument("--from-last-frame", metavar="VIDEO",
+                            help="start from the last frame of a video (file or request_id), needs ffmpeg")
     generation.add_argument(
         "--param", action="append", default=[], metavar="KEY=VALUE",
         help="additional model parameter, can be repeated",
@@ -1177,6 +1264,12 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("run", parents=[common, generation, budget, results], help="submit + wait + download")
     p.add_argument("--timeout", type=int, default=600)
     p.set_defaults(func=cmd_run)
+
+    p = sub.add_parser("concat", parents=[common], help="join clips into one video (ffmpeg, free)")
+    p.add_argument("clips", nargs="+", help="video files or request_ids, in order")
+    p.add_argument("--out-file", type=Path, help="target file (default: outputs/<date>_<time>_concat.mp4)")
+    p.add_argument("--open", action="store_true", help="open the gallery in the browser afterwards")
+    p.set_defaults(func=cmd_concat)
 
     p = sub.add_parser("gallery", parents=[common], help="HTML overview of all results, opens in the browser")
     p.add_argument("--scan", type=Path, metavar="FOLDER",

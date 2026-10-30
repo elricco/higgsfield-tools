@@ -66,6 +66,10 @@ hf download <request_id>
 # Image → video, also from a local file
 hf run kling-video/v2.5-turbo/standard/image-to-video --prompt "slow camera push in" --image-url ./photo.jpg
 
+# Continue from the last frame of that clip, then join both (needs ffmpeg)
+hf run kling-video/v2.5-turbo/standard/image-to-video --prompt "the camera keeps drifting" --from-last-frame <request_id>
+hf concat <request_id_1> <request_id_2>
+
 # Recurring character
 hf character views base.png --details "dark curly hair tied back, green eyes" --max-usd 0.20
 hf character create Mila base.png outputs/*.png --model-version v2 --max-usd 2.50
@@ -96,14 +100,16 @@ Next to every downloaded file there is a `.json` sidecar with prompt, parameters
 | `download <request_id> [--out outputs]` | save the result files |
 | `run <model> --prompt ... [--max-usd USD]` | submit + wait + download |
 | `spend [--days N]` | estimated costs from the job log, per model |
+| `concat <clips...> [--out-file PATH]` | join clips (files or request_ids) into one video with ffmpeg, free |
 | `gallery [--scan FOLDER] [--no-open]` | HTML overview of all results, opens in the browser |
 | `cancel <request_id>` | cancel a job while it is still `queued` |
 | `upload <file>` | upload a local file, prints its public URL |
 | `character views\|create\|status\|list\|add` | create training views, train and manage Soul ID characters |
 | `doctor` | check the setup: credentials, API, docs, catalog |
 
-Generation commands also accept `--image-urls A B ...` (edit models; local files are uploaded) and
-`--character <name>` (SOUL with a trained character).
+Generation commands also accept `--image-urls A B ...` (edit models; local files are uploaded),
+`--character <name>` (SOUL with a trained character) and `--from-last-frame <video or request_id>`
+(continues a clip from its last frame, needs ffmpeg).
 
 `run` and `download` rebuild the gallery after every download; `--open` also opens it.
 
