@@ -1,0 +1,5 @@
+# One job per line. Try it first with: hf batch examples/batch.jsonl --dry-run
+# "model" can be left out if you pass --model; "params" are the same as --param.
+{"model": "higgsfield-ai/soul/v2/standard", "prompt": "A quiet alpine lake at sunrise, low mist, editorial photography", "params": {"aspect_ratio": "16:9"}}
+{"model": "higgsfield-ai/soul/v2/standard", "prompt": "The same alpine lake at blue hour, first stars, long exposure", "params": {"aspect_ratio": "16:9"}}
+{"model": "higgsfield-ai/soul/v2/standard", "prompt": "A small red cabin on the shore of an alpine lake in winter", "params": {"aspect_ratio": "16:9"}}

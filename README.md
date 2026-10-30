@@ -75,6 +75,10 @@ hf character views base.png --details "dark curly hair tied back, green eyes" --
 hf character create Mila base.png outputs/*.png --model-version v2 --max-usd 2.50
 hf run higgsfield-ai/soul/v2/standard --character Mila --prompt "..."
 
+# Several jobs in parallel from a JSON Lines file: check the total first, then run with a limit
+hf batch examples/batch.jsonl --dry-run
+hf batch examples/batch.jsonl --max-usd 0.02
+
 # What did today cost?
 hf spend --days 1
 
@@ -100,6 +104,7 @@ Next to every downloaded file there is a `.json` sidecar with prompt, parameters
 | `download <request_id> [--out outputs]` | save the result files |
 | `run <model> --prompt ... [--max-usd USD]` | submit + wait + download |
 | `spend [--days N]` | estimated costs from the job log, per model |
+| `batch <file.jsonl> [--dry-run] [--max-usd TOTAL]` | run many jobs in parallel; `--dry-run` only shows the prices |
 | `concat <clips...> [--out-file PATH]` | join clips (files or request_ids) into one video with ffmpeg, free |
 | `gallery [--scan FOLDER] [--no-open]` | HTML overview of all results, opens in the browser |
 | `cancel <request_id>` | cancel a job while it is still `queued` |
@@ -114,7 +119,8 @@ Generation commands also accept `--image-urls A B ...` (edit models; local files
 `run` and `download` rebuild the gallery after every download; `--open` also opens it.
 
 `submit` and `run` ask for the price first (free) and log it. With `--max-usd`, or `HF_MAX_USD` in `.env`, they refuse
-to submit a job whose estimate is higher or unknown.
+to submit a job whose estimate is higher or unknown. For `batch` and `character views`, `--max-usd` is the limit for
+all jobs together, while `HF_MAX_USD` still applies to each job.
 
 All commands accept `--verbose` for full responses and stack traces.
 Exit codes: `0` ok, `1` error or failed job, `2` missing credentials.
@@ -126,6 +132,7 @@ Exit codes: `0` ok, `1` error or failed job, `2` missing credentials.
 | `hf.py` | the CLI |
 | `catalog.py` | catalog logic (parsing the docs, merging, placeholders) |
 | `gallery.py` | builds the HTML gallery from the job log |
+| `examples/batch.jsonl` | example input for `hf batch` |
 | `pyproject.toml` | package metadata, dependencies, the `hf` command |
 | `setup.sh` | setup on this machine |
 | `models.json` | own notes and default parameters for tested models (maintained by hand) |

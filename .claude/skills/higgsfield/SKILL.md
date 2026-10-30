@@ -28,6 +28,11 @@ For problems with credentials or the network, run `hf doctor` first.
    To show results to the user: `hf gallery` (opens an HTML overview of all results in the browser),
    or add `--open` to `run`/`download`.
 
+**Several jobs at once** (variants, series): write one JSON object per line to a `.jsonl` file
+(`{"model": "...", "prompt": "...", "params": {"aspect_ratio": "16:9"}}`, see `examples/batch.jsonl` in the repo), then
+`hf batch jobs.jsonl --dry-run` → state the total (`estimated_usd`) → after confirmation `hf batch jobs.jsonl --max-usd <total>`.
+All jobs run in parallel; one failing job does not stop the others.
+
 For long jobs or after an interruption: `submit` → `wait <id>` → `download <id>`; the same `request_id` is not charged twice.
 
 ## Rules

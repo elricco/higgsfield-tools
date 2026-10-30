@@ -724,10 +724,8 @@ def estimate_cost(session: requests.Session, model_id: str, payload: dict) -> di
     return {"usd": float(usd) if usd is not None else None, "pricing": result.get("pricing_description")}
 
 
-def max_usd_limit(args: argparse.Namespace) -> float | None:
-    """The cost limit: --max-usd wins, otherwise HF_MAX_USD, otherwise no limit."""
-    if args.max_usd is not None:
-        return args.max_usd
+def env_max_usd() -> float | None:
+    """The per-job limit from HF_MAX_USD (environment or .env), None if not set."""
     value = os.environ.get(MAX_USD_ENV)
     if not value:
         return None
@@ -735,6 +733,19 @@ def max_usd_limit(args: argparse.Namespace) -> float | None:
         return float(value)
     except ValueError:
         raise CliError(f"{MAX_USD_ENV} must be a number, e.g. 0.50 (is '{value}').")
+
+
+def max_usd_limit(args: argparse.Namespace) -> float | None:
+    """The cost limit: --max-usd wins, otherwise HF_MAX_USD, otherwise no limit."""
+    return args.max_usd if args.max_usd is not None else env_max_usd()
+
+
+def safe_estimate(session: requests.Session, model_id: str, payload: dict) -> dict:
+    """Like estimate_cost, but a failing estimate gives an unknown price instead of an error."""
+    try:
+        return estimate_cost(session, model_id, payload)
+    except CliError as error:
+        return {"usd": None, "pricing": None, "estimate_error": str(error)}
 
 
 def check_budget(cost: dict, max_usd: float | None) -> None:
@@ -748,21 +759,21 @@ def check_budget(cost: dict, max_usd: float | None) -> None:
         raise CliError(f"Estimated cost ${cost['usd']:.3f} is above the limit of ${max_usd:.3f}. Nothing was submitted.")
 
 
-def submit_generation(session: requests.Session, args: argparse.Namespace) -> dict:
-    """Checks the price, submits a job and records it in the job log.
+def prepare_job(session: requests.Session, args: argparse.Namespace) -> dict:
+    """Step 1 of submitting: build the body (uploads local files once) and estimate the price.
+
+    Nothing is paid yet. The result goes to submit_prepared() as is.
+    """
+    payload = build_payload(args)
+    return {"args": args, "payload": payload, "cost": safe_estimate(session, args.model_id, payload)}
+
+
+def submit_prepared(session: requests.Session, job: dict) -> dict:
+    """Step 2 of submitting: send a prepared job and record it in the job log.
 
     Returns the API response plus "usd" (estimated cost, None if unknown).
     """
-    payload = build_payload(args)
-    max_usd = max_usd_limit(args)
-    try:
-        cost = estimate_cost(session, args.model_id, payload)
-    except CliError as error:
-        # Without a limit the estimate is only nice to have and must not block the job.
-        if max_usd is not None:
-            raise CliError(f"Estimate failed, so the limit cannot be checked: {error}")
-        cost = {"usd": None, "pricing": None}
-    check_budget(cost, max_usd)
+    args, payload, cost = job["args"], job["payload"], job["cost"]
     # One idempotency key per job: if api_request repeats the call after a
     # timeout, the server recognizes it and does not create a second (paid) job.
     headers = {"Idempotency-Key": str(uuid.uuid4())}
@@ -778,6 +789,21 @@ def submit_generation(session: requests.Session, args: argparse.Namespace) -> di
         **({"from_last_frame": args.from_last_frame} if args.from_last_frame else {}),
     )
     return {**result, "usd": cost["usd"]}
+
+
+def check_prepared_budget(cost: dict, max_usd: float | None) -> None:
+    """check_budget, with a clearer message when the estimate itself failed."""
+    if max_usd is not None and cost.get("estimate_error"):
+        raise CliError(f"Estimate failed, so the limit cannot be checked: {cost['estimate_error']}")
+    check_budget(cost, max_usd)
+
+
+def submit_generation(session: requests.Session, args: argparse.Namespace) -> dict:
+    """Prepares one job, checks it against the limit and submits it."""
+    job = prepare_job(session, args)
+    # Without a limit the estimate is only nice to have; a failing estimate does not block the job.
+    check_prepared_budget(job["cost"], max_usd_limit(args))
+    return submit_prepared(session, job)
 
 
 def cmd_submit(args: argparse.Namespace) -> dict:
@@ -844,16 +870,33 @@ def cmd_run(args: argparse.Namespace) -> dict:
     return {"request_id": result["request_id"], "status": "completed", "files": files, "usd": submitted["usd"]}
 
 
-def run_many(session: requests.Session, jobs: list[argparse.Namespace], timeout: int, out_dir: Path) -> list[dict]:
-    """Submits several jobs, waits for all of them and downloads the results.
+def total_cost(jobs: list[dict]) -> dict:
+    """The summed cost of prepared jobs; unknown as soon as one price is unknown."""
+    unknown = [job for job in jobs if job["cost"]["usd"] is None]
+    if unknown:
+        reasons = {job["cost"].get("pricing") or job["cost"].get("estimate_error") or "no estimate" for job in unknown}
+        return {"usd": None, "pricing": f"{len(unknown)} of {len(jobs)} jobs: " + "; ".join(sorted(reasons))}
+    return {"usd": round(sum(job["cost"]["usd"] for job in jobs), 3), "pricing": None}
+
+
+def check_many_budget(jobs: list[dict], max_usd_total: float | None) -> None:
+    """--max-usd applies to all jobs together, HF_MAX_USD to each single job."""
+    check_budget(total_cost(jobs), max_usd_total)
+    per_job = env_max_usd()
+    for job in jobs:
+        check_prepared_budget(job["cost"], per_job)
+
+
+def run_many(session: requests.Session, jobs: list[dict], timeout: int, out_dir: Path) -> list[dict]:
+    """Submits several prepared jobs, waits for all of them and downloads the results.
 
     All jobs are submitted first, so Higgsfield works on them at the same time.
     A failing job does not stop the others; it gets an "error" entry instead.
     """
     entries = []
-    for job_args in jobs:
+    for job in jobs:
         try:
-            submitted = submit_generation(session, job_args)
+            submitted = submit_prepared(session, job)
             entries.append({"request_id": submitted["request_id"], "usd": submitted["usd"]})
         except CliError as error:
             entries.append({"error": str(error)})
@@ -895,16 +938,74 @@ def cmd_character_views(args: argparse.Namespace) -> dict:
     session = make_session()
     # Upload once, then all views use the same URL.
     base_url = resolve_input_url(args.base, session)
-    jobs = [view_args(view, base_url, args) for view in args.views]
+    jobs = [prepare_job(session, view_args(view, base_url, args)) for view in args.views]
     # Check the price for all views together before anything is submitted.
-    cost = estimate_cost(session, args.model, build_payload(jobs[0]))
-    total = {"usd": cost["usd"] * len(jobs) if cost["usd"] is not None else None, "pricing": cost["pricing"]}
-    check_budget(total, max_usd_limit(args))
+    check_many_budget(jobs, args.max_usd)
     entries = run_many(session, jobs, args.timeout, args.out)
     for view, entry in zip(args.views, entries):
         entry["view"] = view
     refresh_gallery(args.open)
     return {"base": str(args.base), "views": entries, **summarize_many(entries)}
+
+
+# Fields allowed in one line of a batch file.
+BATCH_FIELDS = {"model", "prompt", "params", "image_url", "image_urls", "character", "from_last_frame"}
+
+
+def batch_job_args(data: dict, default_model: str | None, line_number: int) -> argparse.Namespace:
+    """Turns one line of a batch file into the same arguments 'hf run' would get."""
+    unknown = set(data) - BATCH_FIELDS
+    if unknown:
+        raise CliError(f"Line {line_number}: unknown field(s) {', '.join(sorted(unknown))}. "
+                       f"Allowed: {', '.join(sorted(BATCH_FIELDS))}")
+    model = data.get("model") or default_model
+    if not model or not data.get("prompt"):
+        raise CliError(f"Line {line_number}: 'prompt' and 'model' (or --model) are required.")
+    # json.dumps keeps the type: 5 stays a number, "16:9" stays text, when parse_param reads it back.
+    params = [f"{key}={json.dumps(value)}" for key, value in data.get("params", {}).items()]
+    return argparse.Namespace(model_id=model, prompt=data["prompt"], image_url=data.get("image_url"),
+                              image_urls=data.get("image_urls"), character=data.get("character"),
+                              param=params, max_usd=None, from_last_frame=data.get("from_last_frame"))
+
+
+def read_batch_file(path: Path, default_model: str | None) -> list[argparse.Namespace]:
+    """Reads a JSON Lines file: one job per line, empty lines and lines starting with # are skipped."""
+    if not path.is_file():
+        raise CliError(f"File not found: {path}")
+    jobs = []
+    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        try:
+            data = json.loads(line)
+        except json.JSONDecodeError as error:
+            raise CliError(f"Line {line_number}: not valid JSON ({error.msg}).")
+        if not isinstance(data, dict):
+            raise CliError(f"Line {line_number}: expected a JSON object {{...}}.")
+        jobs.append(batch_job_args(data, default_model, line_number))
+    if not jobs:
+        raise CliError(f"{path.name} contains no jobs.")
+    return jobs
+
+
+def cmd_batch(args: argparse.Namespace) -> dict:
+    """Runs all jobs of a batch file in parallel, after checking the total cost."""
+    job_args = read_batch_file(args.file, args.model)
+    session = make_session()
+    jobs = [prepare_job(session, single) for single in job_args]
+    if args.dry_run:
+        return {
+            "jobs": [{"model": job["args"].model_id, "prompt": job["args"].prompt[:60], "usd": job["cost"]["usd"],
+                      **({"pricing": job["cost"]["pricing"]} if job["cost"].get("pricing") else {})}
+                     for job in jobs],
+            "estimated_usd": total_cost(jobs)["usd"],
+        }
+    # --max-usd is the limit for the whole batch here; HF_MAX_USD still applies to each job.
+    check_many_budget(jobs, args.max_usd)
+    entries = run_many(session, jobs, args.timeout, args.out)
+    refresh_gallery(args.open)
+    return {"jobs": entries, **summarize_many(entries)}
 
 
 def cmd_spend(args: argparse.Namespace) -> dict:
@@ -1264,6 +1365,14 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("run", parents=[common, generation, budget, results], help="submit + wait + download")
     p.add_argument("--timeout", type=int, default=600)
     p.set_defaults(func=cmd_run)
+
+    p = sub.add_parser("batch", parents=[common, budget, results],
+                       help="run all jobs from a JSON Lines file in parallel (costs money!)")
+    p.add_argument("file", type=Path, help="one job per line, e.g. {\"prompt\": \"...\", \"params\": {\"duration\": 5}}")
+    p.add_argument("--model", help="model for lines without a \"model\" field")
+    p.add_argument("--dry-run", action="store_true", help="only show the estimated prices, submit nothing")
+    p.add_argument("--timeout", type=int, default=900)
+    p.set_defaults(func=cmd_batch)
 
     p = sub.add_parser("concat", parents=[common], help="join clips into one video (ffmpeg, free)")
     p.add_argument("clips", nargs="+", help="video files or request_ids, in order")

@@ -16,6 +16,7 @@ Only read when needed. The short version is in [SKILL.md](SKILL.md).
 | `wait <request_id> [--timeout 600]` | final status; polling 2 s → 10 s |
 | `download <request_id> [--out outputs]` | `{"request_id", "status", "files": [...]}` |
 | `run <model_id> --prompt ... [--max-usd USD] [--timeout] [--out]` | like `download` plus `"usd"` |
+| `batch <file.jsonl> [--model M] [--dry-run] [--max-usd TOTAL] [--out] [--open]` | dry run: `{"jobs": [{"model", "prompt", "usd"}], "estimated_usd"}`; otherwise `{"jobs": [{"request_id", "status", "files", "usd"}], "usd", ["error"]}` |
 | `concat <clips...> [--out-file PATH] [--open]` | `{"file", "clips"}`; joins videos (files or request_ids) with ffmpeg, free |
 | `gallery [--scan FOLDER] [--no-open]` | `{"file", "jobs", "missing_files", ["added_files"]}`; writes `gallery.html` and opens it |
 | `spend [--days N]` | `{"since", "estimated_usd", "by_model", "jobs", "running", "not_charged", "price_unknown", "untracked"}` |
@@ -32,6 +33,10 @@ Additional generation options: `--image-urls A B ...` (edit models), `--characte
 
 `--param` reads values as JSON: `duration=5` → number, `enhance_prompt=true` → bool, `aspect_ratio=16:9` → text.
 Order in the body: defaults from `models.json` → `--prompt`/`--image-url` → `--param`.
+
+Batch lines allow the fields `model`, `prompt`, `params` (object), `image_url`, `image_urls`, `character`, `from_last_frame`.
+Empty lines and lines starting with `#` are skipped. For `batch` and `character views`, `--max-usd` limits the **total**;
+`HF_MAX_USD` still limits each single job.
 
 `submit`/`run` always ask `estimate` first (free) and log the price. Limit: `--max-usd`, otherwise `HF_MAX_USD` from the
 environment/`.env`. If the price is higher or unknown, nothing is submitted (exit code 1).

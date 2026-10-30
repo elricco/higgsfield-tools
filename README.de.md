@@ -77,6 +77,10 @@ hf character views basis.png --details "dark curly hair tied back, green eyes" -
 hf character create Mila basis.png outputs/*.png --model-version v2 --max-usd 2.50
 hf run higgsfield-ai/soul/v2/standard --character Mila --prompt "..."
 
+# Mehrere Jobs parallel aus einer JSON-Lines-Datei: erst die Summe prüfen, dann mit Limit starten
+hf batch examples/batch.jsonl --dry-run
+hf batch examples/batch.jsonl --max-usd 0.02
+
 # Was hat heute gekostet?
 hf spend --days 1
 
@@ -102,6 +106,7 @@ Neben jeder heruntergeladenen Datei liegt eine `.json` mit Prompt, Parametern, M
 | `download <request_id> [--out outputs]` | Dateien speichern |
 | `run <model> --prompt ... [--max-usd USD]` | submit + wait + download |
 | `spend [--days N]` | geschätzte Kosten aus dem Job-Logbuch, je Modell |
+| `batch <datei.jsonl> [--dry-run] [--max-usd SUMME]` | viele Jobs parallel; `--dry-run` zeigt nur die Preise |
 | `concat <clips...> [--out-file PFAD]` | Clips (Dateien oder request_ids) per ffmpeg zu einem Video verbinden, kostenlos |
 | `gallery [--scan ORDNER] [--no-open]` | HTML-Übersicht aller Ergebnisse, öffnet im Browser |
 | `cancel <request_id>` | Job abbrechen, solange er `queued` ist |
@@ -116,7 +121,8 @@ Generierungen kennen außerdem `--image-urls A B ...` (Edit-Modelle; lokale Date
 `run` und `download` bauen die Galerie nach jedem Download neu; mit `--open` wird sie auch geöffnet.
 
 `submit` und `run` fragen vorher den Preis ab (kostenlos) und speichern ihn. Mit `--max-usd` oder `HF_MAX_USD` in `.env`
-schicken sie keinen Job ab, dessen Schätzung höher oder unbekannt ist.
+schicken sie keinen Job ab, dessen Schätzung höher oder unbekannt ist. Bei `batch` und `character views` gilt `--max-usd`
+für alle Jobs zusammen, `HF_MAX_USD` weiterhin für jeden einzelnen Job.
 
 Alle Befehle kennen `--verbose` für vollständige Antworten und Stacktraces.
 Exit-Codes: `0` ok, `1` Fehler bzw. Job fehlgeschlagen, `2` Zugangsdaten fehlen.
@@ -128,6 +134,7 @@ Exit-Codes: `0` ok, `1` Fehler bzw. Job fehlgeschlagen, `2` Zugangsdaten fehlen.
 | `hf.py` | das CLI |
 | `catalog.py` | Katalog-Logik (Doku auslesen, zusammenführen, Platzhalter) |
 | `gallery.py` | baut die HTML-Galerie aus dem Job-Logbuch |
+| `examples/batch.jsonl` | Beispiel-Eingabe für `hf batch` |
 | `pyproject.toml` | Paketbeschreibung, Abhängigkeiten, Befehl `hf` |
 | `setup.sh` | Einrichtung auf diesem Rechner |
 | `models.json` | eigene Notizen und Standardparameter getesteter Modelle (von Hand gepflegt) |

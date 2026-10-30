@@ -831,20 +831,19 @@ def test_run_rebuilds_gallery(sleeps, models_file, no_env_file, no_max_usd, tmp_
 # --- Character views and run_many -------------------------------------------
 
 
-def views_session(*poll_results):
-    """Estimate for the budget check, then estimate + submit per view, then one poll per view."""
-    responses = [FakeResponse(200, {"usd": "0.040"})]
-    for number, _ in enumerate(poll_results, start=1):
-        responses += [FakeResponse(200, {"usd": "0.040"}),
-                      FakeResponse(200, {"request_id": f"v{number}", "status": "queued"})]
-    return FakeSession(responses + [FakeResponse(200, body) for body in poll_results])
+def many_session(*poll_results, usd="0.040"):
+    """Responses for run_many: one estimate per job, then one submit per job, then one poll per job."""
+    estimates = [FakeResponse(200, {"usd": usd}) for _ in poll_results]
+    submits = [FakeResponse(200, {"request_id": f"v{number}", "status": "queued"})
+               for number, _ in enumerate(poll_results, start=1)]
+    return FakeSession(estimates + submits + [FakeResponse(200, body) for body in poll_results])
 
 
 def test_character_views_creates_selected_views(sleeps, no_env_file, no_max_usd, tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(hf, "MODELS_FILE", tmp_path / "models.json")
     (tmp_path / "models.json").write_text("{}")
     monkeypatch.setattr(hf, "download_file", lambda url, target: target.write_bytes(b"IMG"))
-    session = views_session(
+    session = many_session(
         {"request_id": "v1", "status": "completed", "images": [{"url": "https://cdn/1.png"}]},
         {"request_id": "v2", "status": "nsfw"},
     )
@@ -869,12 +868,13 @@ def test_character_views_creates_selected_views(sleeps, no_env_file, no_max_usd,
 def test_character_views_checks_total_budget(sleeps, no_env_file, no_max_usd, tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(hf, "MODELS_FILE", tmp_path / "models.json")
     (tmp_path / "models.json").write_text("{}")
-    session = FakeSession([FakeResponse(200, {"usd": "0.040"})])
+    session = FakeSession([FakeResponse(200, {"usd": "0.040"})] * 5)
     monkeypatch.setattr(hf, "make_session", lambda: session)
     # 5 views x $0.04 = $0.20 > $0.10
     assert hf.main(["character", "views", "https://x/base.png", "--max-usd", "0.1"]) == 1
     assert "$0.200" in json.loads(capsys.readouterr().out)["error"]
-    assert len(session.calls) == 1
+    # Only the five free estimates, nothing was submitted.
+    assert all("/estimate/" in call["url"] for call in session.calls)
 
 
 # --- Chaining clips (ffmpeg) ------------------------------------------------
@@ -956,3 +956,89 @@ def test_concat_needs_two_clips(no_env_file, tmp_path, capsys):
     clip = tmp_path / "a.mp4"
     clip.write_bytes(b"x")
     assert hf.main(["concat", str(clip)]) == 1
+
+
+# --- Batch ------------------------------------------------------------------
+
+
+def write_batch(tmp_path, *lines) -> Path:
+    path = tmp_path / "jobs.jsonl"
+    path.write_text("\n".join(lines) + "\n")
+    return path
+
+
+def test_read_batch_file(tmp_path, models_file):
+    path = write_batch(tmp_path,
+                       "# a comment", "",
+                       '{"prompt": "a lake", "params": {"duration": 5, "aspect_ratio": "16:9", "seed": "7"}}',
+                       '{"model": "other/model", "prompt": "a cabin"}')
+    jobs = hf.read_batch_file(path, "test/image")
+    assert [job.model_id for job in jobs] == ["test/image", "other/model"]
+    payload = hf.build_payload(jobs[0])
+    # Types survive the round trip: number stays number, text stays text (even "7").
+    assert payload["duration"] == 5
+    assert payload["aspect_ratio"] == "16:9"
+    assert payload["seed"] == "7"
+
+
+@pytest.mark.parametrize("line, message", [
+    ('{"prompt": "x", "colour": "red"}', "unknown field"),
+    ('{"params": {}}', "'prompt' and 'model'"),
+    ('not json', "not valid JSON"),
+    ('["a list"]', "JSON object"),
+])
+def test_read_batch_file_errors(tmp_path, line, message):
+    with pytest.raises(hf.CliError, match=message):
+        hf.read_batch_file(write_batch(tmp_path, line), "test/image")
+
+
+def test_batch_dry_run_submits_nothing(no_env_file, models_file, tmp_path, monkeypatch, capsys):
+    session = FakeSession([FakeResponse(200, {"usd": "0.004"}), FakeResponse(200, {"usd": "0.400"})])
+    monkeypatch.setattr(hf, "make_session", lambda: session)
+    path = write_batch(tmp_path, '{"prompt": "a"}', '{"prompt": "b"}')
+
+    assert hf.main(["batch", str(path), "--model", "test/image", "--dry-run"]) == 0
+
+    output = json.loads(capsys.readouterr().out)
+    assert output["estimated_usd"] == 0.404
+    assert [job["usd"] for job in output["jobs"]] == [0.004, 0.4]
+    assert len(session.calls) == 2
+
+
+def test_batch_total_limit(no_env_file, no_max_usd, models_file, tmp_path, monkeypatch, capsys):
+    session = FakeSession([FakeResponse(200, {"usd": "0.300"})] * 2)
+    monkeypatch.setattr(hf, "make_session", lambda: session)
+    path = write_batch(tmp_path, '{"prompt": "a"}', '{"prompt": "b"}')
+    # Each job is below $0.50, but together they cost $0.60.
+    assert hf.main(["batch", str(path), "--model", "test/image", "--max-usd", "0.5"]) == 1
+    assert "$0.600" in json.loads(capsys.readouterr().out)["error"]
+
+
+def test_batch_per_job_limit_from_environment(no_env_file, models_file, tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("HF_MAX_USD", "0.10")
+    monkeypatch.setattr(hf, "make_session", lambda: FakeSession([FakeResponse(200, {"usd": "0.300"})]))
+    path = write_batch(tmp_path, '{"prompt": "a"}')
+    assert hf.main(["batch", str(path), "--model", "test/image", "--max-usd", "5"]) == 1
+    assert "limit of $0.100" in json.loads(capsys.readouterr().out)["error"]
+
+
+def test_batch_runs_all_jobs(sleeps, no_env_file, no_max_usd, models_file, tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(hf, "download_file", lambda url, target: target.write_bytes(b"IMG"))
+    monkeypatch.setattr(hf, "make_session", lambda: many_session(
+        {"request_id": "v1", "status": "completed", "images": [{"url": "https://cdn/1.png"}]},
+        {"request_id": "v2", "status": "completed", "images": [{"url": "https://cdn/2.png"}]},
+        usd="0.004",
+    ))
+    path = write_batch(tmp_path, '{"prompt": "a"}', '{"prompt": "b"}')
+
+    assert hf.main(["batch", str(path), "--model", "test/image", "--out", str(tmp_path / "out")]) == 0
+
+    output = json.loads(capsys.readouterr().out)
+    assert output["usd"] == 0.008
+    assert [len(job["files"]) for job in output["jobs"]] == [1, 1]
+    assert hf.load_history()["v2"]["prompt"] == "b"
+
+
+def test_example_batch_file_is_valid():
+    jobs = hf.read_batch_file(hf.PROJECT_DIR / "examples" / "batch.jsonl", None)
+    assert len(jobs) == 3
