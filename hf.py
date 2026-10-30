@@ -426,6 +426,21 @@ def cmd_character_status(args: argparse.Namespace) -> dict:
     return output
 
 
+def cmd_character_add(args: argparse.Namespace) -> dict:
+    """Trägt einen schon trainierten Charakter (z. B. von einem anderen Rechner) lokal ein."""
+    if args.name.lower() in (name.lower() for name in load_characters()):
+        raise CliError(f"Es gibt schon einen Charakter '{args.name}'.")
+    # Prüfen, ob die ID zu diesem Konto gehört – kostet nichts.
+    result = api_request(make_session(), "GET", f"/v1/custom-references/{args.id}")
+    save_character(args.name, {
+        "id": args.id,
+        "model_version": args.model_version,
+        "status": result.get("status"),
+        "added": date.today().isoformat(),
+    })
+    return {"name": args.name, "id": args.id, "status": result.get("status")}
+
+
 def cmd_character_list(args: argparse.Namespace) -> dict:
     return {
         "characters": [
@@ -663,6 +678,49 @@ def cmd_info(args: argparse.Namespace) -> dict:
     return output
 
 
+def check_api() -> str:
+    """Fragt den Status einer erfundenen Request-ID ab: 404 heißt, Zugangsdaten passen."""
+    key, secret = load_credentials()
+    try:
+        # Bewusst ohne api_request: keine Retries, kurzer Timeout – ein Check soll schnell sein.
+        response = requests.get(f"{BASE_URL}/requests/00000000-0000-0000-0000-000000000000/status",
+                                headers={"Authorization": f"Key {key}:{secret}"}, timeout=10)
+    except requests.RequestException as error:
+        return f"nicht erreichbar ({type(error).__name__}) – Firewall? *.higgsfield.ai freigeben"
+    if response.status_code == 404:
+        return "ok"
+    if response.status_code == 401:
+        return "Zugangsdaten falsch (401)"
+    return f"unerwartet: HTTP {response.status_code}"
+
+
+def check_docs() -> str:
+    try:
+        requests.head(DOCS_FULL_URL, timeout=10).raise_for_status()
+    except requests.RequestException as error:
+        return f"nicht erreichbar ({type(error).__name__}) – nur für 'catalog update' nötig"
+    return "ok"
+
+
+def cmd_doctor(args: argparse.Namespace) -> dict:
+    checks = {}
+    try:
+        load_credentials()
+        checks["credentials"] = "ok"
+        checks["api"] = check_api()
+    except CliError as error:
+        checks["credentials"] = str(error)
+    checks["docs"] = check_docs()
+    catalog_data = read_json_file(CATALOG_FILE, None)
+    checks["catalog"] = f"Stand {catalog_data['updated']}" if catalog_data else "fehlt – 'hf catalog update'"
+    output = {"checks": checks}
+    # Doku und Katalog sind optional; ohne Zugangsdaten oder API geht aber nichts.
+    problems = [name for name in ("credentials", "api") if checks.get(name, "ok") != "ok"]
+    if problems:
+        output["error"] = "Problem bei: " + ", ".join(problems)
+    return output
+
+
 def download_docs(docs_file: Path | None) -> str:
     """Liest llms-full.txt – aus einer lokalen Datei oder aus dem Netz."""
     if docs_file:
@@ -838,6 +896,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_character_status)
     p = character_sub.add_parser("list", parents=[common], help="lokal bekannte Charaktere")
     p.set_defaults(func=cmd_character_list)
+    p = character_sub.add_parser("add", parents=[common], help="vorhandene Charakter-ID lokal eintragen")
+    p.add_argument("name")
+    p.add_argument("id", help="ID aus 'character list' auf dem anderen Rechner")
+    p.add_argument("--model-version", choices=["v1", "v2", "cinema"], default="v2")
+    p.set_defaults(func=cmd_character_add)
+
+    p = sub.add_parser("doctor", parents=[common], help="Einrichtung prüfen: Zugangsdaten, API, Doku, Katalog")
+    p.set_defaults(func=cmd_doctor)
 
     p = sub.add_parser("catalog", parents=[common], help="Modellkatalog verwalten")
     catalog_sub = p.add_subparsers(dest="catalog_command", required=True)

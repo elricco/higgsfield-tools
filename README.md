@@ -4,50 +4,69 @@ Schlankes Python-CLI, um über die [Higgsfield-API](https://docs.higgsfield.ai) 
 Jeder Befehl gibt genau eine Zeile JSON aus. Das hält den Kontext klein, wenn Claude das CLI über den
 Skill in `.claude/skills/higgsfield/` benutzt.
 
-## Installation
+## Einrichten (auch auf einem neuen Rechner)
+
+Voraussetzungen: macOS oder Linux, Python ≥ 3.10, Git. Optional `ffmpeg` (Einzelbilder aus Videos).
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+git clone <repo-url> higgsfield-tools
+cd higgsfield-tools
+./setup.sh
 ```
 
-## Zugangsdaten
+`setup.sh` kann jederzeit erneut laufen (z. B. nach `git pull`) und macht Folgendes:
 
-Key-ID und Secret aus der [Higgsfield Console](https://console.higgsfield.ai) in eine `.env` eintragen
-(Vorlage: `.env.example`, wird von Git ignoriert):
+1. prüft die Python-Version (anderes Python: `PYTHON=python3.12 ./setup.sh`),
+2. legt `.venv` im Repo an und installiert das Paket dort **editierbar** – nichts wird global installiert,
+3. verlinkt den Befehl `~/.local/bin/hf` → `.venv/bin/hf` (muss im `PATH` stehen),
+4. verlinkt den Claude-Skill `~/.claude/skills/higgsfield` → `.claude/skills/higgsfield`,
+5. legt `.env` aus `.env.example` an, falls sie fehlt,
+6. ruft `hf doctor` auf.
 
-```bash
-cp .env.example .env   # dann Werte eintragen
-```
+Danach:
 
-`hf.py` lädt `.env` beim Start selbst. Bereits gesetzte Umgebungsvariablen (`export HF_API_KEY=...`) haben Vorrang.
+1. **Zugangsdaten:** Key-ID und Secret aus der [Higgsfield Console](https://console.higgsfield.ai) in `.env`
+   eintragen (wird von Git ignoriert). Bereits gesetzte Umgebungsvariablen haben Vorrang.
+2. **Firewall** (falls z. B. Little Snitch läuft): dem Python aus der `.venv` ausgehendes HTTPS erlauben zu
+   `*.higgsfield.ai` (API), `*.cloudfront.net` (Ergebnisse und Uploads) und `docs.higgsfield.ai`
+   (Vercel, nur für `catalog update`).
+3. **Prüfen:** `hf doctor` – alle Checks sollten `ok` sein.
+4. **Katalog auffrischen:** `hf catalog update && hf prices` (beides kostenlos).
+5. **Charaktere** (Soul ID) aus `characters.json` sind nicht im Repo. Auf dem alten Rechner `hf character list`,
+   auf dem neuen je `hf character add <Name> <ID>`.
+
+Deinstallieren: `rm ~/.local/bin/hf ~/.claude/skills/higgsfield` und den Repo-Ordner löschen.
 
 ## Beispiele
 
+`hf` funktioniert in jedem Ordner. Downloads landen in `./outputs` des aktuellen Ordners.
+
 ```bash
 # Katalog und Preise aktualisieren (kostenlos)
-python hf.py catalog update
-python hf.py prices
+hf catalog update
+hf prices
 
 # Günstigste Bild-zu-Video-Modelle, Details zu einem Modell
-python hf.py models --op image2video --sort price --limit 5
-python hf.py info kling-video/v2.5-turbo/standard/image-to-video
+hf models --op image2video --sort price --limit 5
+hf info kling-video/v2.5-turbo/standard/image-to-video
 
 # Kosten vorab (kostenlos)
-python hf.py estimate higgsfield-ai/soul/v2/standard --prompt "A quiet alpine lake at sunrise"
+hf estimate higgsfield-ai/soul/v2/standard --prompt "A quiet alpine lake at sunrise"
 
 # Bild erzeugen: in einem Schritt …
-python hf.py run higgsfield-ai/soul/v2/standard --prompt "A quiet alpine lake at sunrise" --param aspect_ratio=16:9
+hf run higgsfield-ai/soul/v2/standard --prompt "A quiet alpine lake at sunrise" --param aspect_ratio=16:9
 
 # … oder einzeln
-python hf.py submit higgsfield-ai/soul/v2/standard --prompt "..."
-python hf.py wait <request_id>
-python hf.py download <request_id>
+hf submit higgsfield-ai/soul/v2/standard --prompt "..."
+hf wait <request_id>
+hf download <request_id>
 
-# Bild → Video
-python hf.py status <request_id_des_bildes> --urls
-python hf.py run kling-video/v2.5-turbo/standard/image-to-video --prompt "slow camera push in" --image-url "<url>"
+# Bild → Video, auch mit lokaler Datei
+hf run kling-video/v2.5-turbo/standard/image-to-video --prompt "slow camera push in" --image-url ./foto.jpg
+
+# Wiederkehrender Charakter
+hf character create Mila bild1.png bild2.png ... --model-version v2
+hf run higgsfield-ai/soul/v2/standard --character Mila --prompt "..."
 ```
 
 ## Befehle
@@ -64,6 +83,13 @@ python hf.py run kling-video/v2.5-turbo/standard/image-to-video --prompt "slow c
 | `wait <request_id> [--timeout 600]` | warten bis fertig |
 | `download <request_id> [--out outputs]` | Dateien speichern |
 | `run <model> --prompt ...` | submit + wait + download |
+| `cancel <request_id>` | Job abbrechen, solange er `queued` ist |
+| `upload <datei>` | lokale Datei hochladen, gibt öffentliche URL aus |
+| `character create\|status\|list\|add` | Soul-ID-Charaktere trainieren und verwalten |
+| `doctor` | Einrichtung prüfen: Zugangsdaten, API, Doku, Katalog |
+
+Generierungen kennen außerdem `--image-urls A B ...` (Edit-Modelle; lokale Dateien werden hochgeladen) und
+`--character <Name>` (SOUL mit trainiertem Charakter).
 
 Alle Befehle kennen `--verbose` für vollständige Antworten und Stacktraces.
 Exit-Codes: `0` ok, `1` Fehler bzw. Job fehlgeschlagen, `2` Zugangsdaten fehlen.
@@ -74,15 +100,19 @@ Exit-Codes: `0` ok, `1` Fehler bzw. Job fehlgeschlagen, `2` Zugangsdaten fehlen.
 | - | - |
 | `hf.py` | das CLI |
 | `catalog.py` | Katalog-Logik (Doku auslesen, zusammenführen, Platzhalter) |
+| `pyproject.toml` | Paketbeschreibung, Abhängigkeiten, Befehl `hf` |
+| `setup.sh` | Einrichtung auf diesem Rechner |
 | `models.json` | eigene Notizen und Standardparameter getesteter Modelle (von Hand gepflegt) |
 | `catalog.json`, `prices.json` | erzeugt von `catalog update` bzw. `prices` |
-| `outputs/` | Downloads (ignoriert von Git) |
+| `characters.json` | Charakter-Name → Soul-ID (lokal, nicht in Git) |
 | `.claude/skills/higgsfield/` | Skill für Claude Code |
+
+Die Datendateien liegen immer im Repo, egal aus welchem Ordner `hf` aufgerufen wird.
 
 ## Tests
 
 ```bash
-python -m pytest -q
+.venv/bin/python -m pytest -q
 ```
 
 Die Tests laufen ohne Netzwerk: HTTP wird durch eine `FakeSession` ersetzt.
@@ -91,6 +121,6 @@ Die Tests laufen ohne Netzwerk: HTTP wird durch eine `FakeSession` ersetzt.
 
 - `GET /models` ist nicht dokumentiert und kann sich ändern. Fällt er weg, bleibt die Doku als Quelle.
 - Ergebnisse liegen nur 7 Tage bei Higgsfield, deshalb immer `download`.
-- Mit einer App-Firewall (z. B. Little Snitch) braucht Python Zugriff auf `*.higgsfield.ai`,
-  `*.cloudfront.net` (Ergebnisse) und die Doku (`docs.higgsfield.ai` → Vercel).
-- Später möglich: Upload lokaler Dateien (`/files/generate-upload-url`), `cancel`-Befehl, Webhooks statt Polling.
+- Homebrew-Python ist nur ad-hoc signiert; Little Snitch kann es deshalb mit einem signierten „Python“
+  verwechseln und warnen. Pfad in der Meldung prüfen: Er sollte auf das Python der `.venv` zeigen.
+- Später möglich: Webhooks statt Polling.

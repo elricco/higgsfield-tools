@@ -1,24 +1,26 @@
 ---
 name: higgsfield
-description: Bilder und Videos über die Higgsfield-API erzeugen (Text-zu-Bild, Bild-zu-Video, Text-zu-Video, Video-Edit) mit dem lokalen CLI hf.py. Verwenden, wenn der User ein Bild, Foto, Video, einen Clip oder eine Animation generieren will, ein Modell wie SOUL, Kling, Seedance, Wan, Hailuo, Recraft oder Z-Image erwähnt, nach Preisen oder verfügbaren Higgsfield-Modellen fragt oder Higgsfield nennt.
+description: Bilder und Videos über die Higgsfield-API erzeugen (Text-zu-Bild, Bild-zu-Video, Text-zu-Video, Video-Edit) mit dem CLI hf. Verwenden, wenn der User ein Bild, Foto, Video, einen Clip oder eine Animation generieren will, ein Modell wie SOUL, Kling, Seedance, Wan, Hailuo, Recraft oder Z-Image erwähnt, nach Preisen oder verfügbaren Higgsfield-Modellen fragt oder Higgsfield nennt.
 ---
 
 # Higgsfield: Bilder und Videos erzeugen
 
-Alle Befehle im Projektordner mit `.venv/bin/python hf.py ...` ausführen.
+Alle Befehle mit `hf ...` ausführen – funktioniert in jedem Ordner. Downloads landen in `./outputs` des
+aktuellen Ordners (anderer Ort: `--out <ordner>`).
 Jeder Befehl gibt **eine Zeile JSON** aus; Exit-Code ≠ 0 heißt Fehler (`{"error": ...}`).
+Bei Problemen mit Zugangsdaten oder Netzwerk zuerst `hf doctor`.
 
 ## Ablauf
 
 1. **Modell finden** (aus lokalem Katalog, kostenlos):
-   `hf.py models --op image2video --sort price --limit 5`
+   `hf models --op image2video --sort price --limit 5`
    Operationen: `text2image`, `image_edit`, `image2video`, `text2video`, `video2video`. Alternativ `--output image|video`, `--search "kling 4.0"`.
-2. **Parameter prüfen:** `hf.py info <model_id>` → `required`, `params` (enum/default), `notes`, `price`.
+2. **Parameter prüfen:** `hf info <model_id>` → `required`, `params` (enum/default), `notes`, `price`.
    Ist `documented: false`, sind nur die Pflichtfelder aus `price.payload` bekannt.
-3. **Kosten nennen:** `hf.py estimate <model_id> --prompt "..." [--image-url URL] [--param k=v ...]` (kostenlos).
+3. **Kosten nennen:** `hf estimate <model_id> --prompt "..." [--image-url URL] [--param k=v ...]` (kostenlos).
    Preis mit den *echten* Parametern abfragen – Dauer und Auflösung ändern ihn stark.
 4. **Erst nach Bestätigung des Users erzeugen:**
-   - Bild: `hf.py run <model_id> --prompt "..." --param aspect_ratio=16:9`
+   - Bild: `hf run <model_id> --prompt "..." --param aspect_ratio=16:9`
    - Video: dasselbe mit `run_in_background` und `--timeout 900` – Videos brauchen 1–5 Minuten.
 5. **Ergebnis berichten:** nur die Pfade aus `files` und ggf. die Kosten. Keine Roh-JSONs.
 
@@ -27,10 +29,10 @@ Bei langen Jobs oder Abbruch: `submit` → `wait <id>` → `download <id>`; dies
 ## Regeln
 
 - **Vor jeder kostenpflichtigen Generierung** Modell + geschätzten Preis nennen und Bestätigung abwarten. Bei Serien die Gesamtsumme nennen.
-- `.env` nie lesen oder ausgeben; Zugangsdaten lädt `hf.py` selbst.
+- `.env` nie lesen oder ausgeben; Zugangsdaten lädt `hf` selbst.
 - `--verbose` / `-v` nur zur Fehlersuche, nicht für normale Ausgaben.
 - Vor Bild-zu-Video sicherstellen, dass `--image-url` nicht leer ist (öffentliche HTTPS-URL oder existierende lokale Datei).
-- Fehlt ein Modell im Katalog oder ist er älter als ~2 Wochen: `hf.py catalog update` und danach `hf.py prices` (beides kostenlos).
+- Fehlt ein Modell im Katalog oder ist er älter als ~2 Wochen: `hf catalog update` und danach `hf prices` (beides kostenlos).
 
 ## Getestete Modelle (Stand 2026-10-30)
 
@@ -48,21 +50,22 @@ Ohne Angaben kostet es 2 $ (10 s, 1080p) – Dauer und Auflösung immer explizit
 ## Bild → Video verketten
 
 ```bash
-.venv/bin/python hf.py run higgsfield-ai/soul/v2/standard --prompt "..." --param aspect_ratio=16:9
-.venv/bin/python hf.py status <request_id_des_bildes> --urls   # -> urls[0]
-.venv/bin/python hf.py run kling-video/v2.5-turbo/standard/image-to-video --prompt "<Bewegung>" --image-url "<urls[0]>"
+hf run higgsfield-ai/soul/v2/standard --prompt "..." --param aspect_ratio=16:9
+hf status <request_id_des_bildes> --urls   # -> urls[0]
+hf run kling-video/v2.5-turbo/standard/image-to-video --prompt "<Bewegung>" --image-url "<urls[0]>"
 ```
 
 Ergebnis-URLs gelten 7 Tage.
 
 **Lokale Dateien:** `--image-url` akzeptiert auch einen Pfad (`./foto.jpg`, `~/Bilder/x.png`) – das CLI lädt die
-Datei automatisch hoch (jpg, png, webp, gif). Nur die URL holen: `hf.py upload <datei>`.
+Datei automatisch hoch (jpg, png, webp, gif). Nur die URL holen: `hf upload <datei>`.
 
-**Abbrechen:** `hf.py cancel <request_id>` – nur solange der Job `queued` ist; ein abgebrochener Job wird erstattet.
+**Abbrechen:** `hf cancel <request_id>` – nur solange der Job `queued` ist; ein abgebrochener Job wird erstattet.
 
 ## Wiederkehrende Charaktere (Soul ID)
 
-Vorhandene Charaktere: `hf.py character list`. Nutzen mit `--character <Name>` bei SOUL-Modellen der passenden
+Vorhandene Charaktere: `hf character list`. Auf einem neuen Rechner fehlen sie dort zunächst – bekannte IDs mit
+`hf character add <Name> <ID>` nachtragen (IDs gelten kontoweit). Nutzen mit `--character <Name>` bei SOUL-Modellen der passenden
 Familie (`model_version` v2 → `higgsfield-ai/soul/v2/standard`); setzt `custom_reference_id` und Stärke 1.0
 (ändern: `--param custom_reference_strength=0.7`, nie 0).
 
@@ -73,7 +76,7 @@ Neuen Charakter anlegen (getesteter Ablauf, ~2,75 $ gesamt):
    Richtung über die **Bildseite** angeben („nose points toward the RIGHT edge of the image“), nicht „her left“ – sonst falsche Seite.
    Getrennte Text-zu-Bild-Läufe ergeben verschiedene Personen – nicht verwenden.
 3. Bilder ansehen, Ausreißer neu erzeugen. Bewährt: Profil L, 3/4 L, frontal, 3/4 R, Profil R, frontal lächelnd.
-4. `hf.py character create <Name> <bilder...> --model-version v2` (2,50 $, vorher bestätigen lassen), dann `character status <Name>`.
+4. `hf character create <Name> <bilder...> --model-version v2` (2,50 $, vorher bestätigen lassen), dann `character status <Name>`.
    Training dauert ~7 min (`not_ready` → `in_progress` → `completed`).
 
 Erfahrungen (Test „Mila“, 2026-10-30): Identität sitzt in Nah- und Halbnah-Aufnahmen sicher, auch mit neuem Ausdruck
@@ -93,8 +96,9 @@ Mehr in [reference.md](reference.md): alle Befehle, Fehlermeldungen, API-Details
 
 | Meldung | Ursache / Lösung |
 |---|---|
-| `HTTP 400: 'x' is a required property` | Pflichtfeld fehlt → `hf.py info <id>` |
+| `hf: command not found` | Nicht eingerichtet → User bitten, `./setup.sh` im Repo `higgsfield-tools` auszuführen |
+| `HTTP 400: 'x' is a required property` | Pflichtfeld fehlt → `hf info <id>` |
 | `HTTP 400: resolution: '2K' is not one of [...]` | Die Fehlermeldung nennt die erlaubten Werte; die OpenAPI-Datei der Doku ist hier falsch |
 | `Netzwerkfehler ... ConnectTimeout` / Download hängt | Firewall (Little Snitch) blockiert Python → User bitten, Domain freizugeben (`*.higgsfield.ai`, `*.cloudfront.net`, Doku: `vercel-dns.com`) |
-| `Noch kein Katalog vorhanden` | `hf.py catalog update` |
+| `Noch kein Katalog vorhanden` | `hf catalog update` |
 | Status `nsfw` / `failed` | Nicht berechnet. Prompt entschärfen bzw. erneut versuchen |

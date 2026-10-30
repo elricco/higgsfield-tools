@@ -458,6 +458,54 @@ def test_character_create_rejects_duplicate_name(characters_file, no_env_file, c
     assert "schon" in json.loads(capsys.readouterr().out)["error"]
 
 
+def test_character_add_checks_id_and_saves(tmp_path, monkeypatch, no_env_file, capsys):
+    monkeypatch.setattr(hf, "CHARACTERS_FILE", tmp_path / "characters.json")
+    session = FakeSession([FakeResponse(200, {"id": "ref-7", "status": "completed"})])
+    monkeypatch.setattr(hf, "make_session", lambda: session)
+
+    assert hf.main(["character", "add", "Mila", "ref-7"]) == 0
+    assert session.calls[0]["url"].endswith("/v1/custom-references/ref-7")
+    assert hf.load_characters()["Mila"]["id"] == "ref-7"
+    assert json.loads(capsys.readouterr().out)["status"] == "completed"
+
+
+def test_character_add_unknown_id(tmp_path, monkeypatch, no_env_file, capsys):
+    monkeypatch.setattr(hf, "CHARACTERS_FILE", tmp_path / "characters.json")
+    monkeypatch.setattr(hf, "make_session", lambda: FakeSession([FakeResponse(404, {"detail": "Not found"})]))
+    assert hf.main(["character", "add", "Mila", "falsch"]) == 1
+    assert hf.load_characters() == {}
+
+
+def test_doctor_reports_missing_credentials(no_env_file, monkeypatch, tmp_path, capsys):
+    monkeypatch.delenv("HF_API_KEY", raising=False)
+    monkeypatch.delenv("HF_API_SECRET", raising=False)
+    monkeypatch.setattr(hf, "check_docs", lambda: "ok")
+    monkeypatch.setattr(hf, "CATALOG_FILE", tmp_path / "missing.json")
+    assert hf.main(["doctor"]) == 1
+    output = json.loads(capsys.readouterr().out)
+    assert output["error"] == "Problem bei: credentials"
+    assert "fehlt" in output["checks"]["catalog"]
+
+
+@pytest.mark.parametrize("status_code, expected", [(404, "ok"), (401, "Zugangsdaten falsch (401)")])
+def test_check_api(monkeypatch, status_code, expected):
+    monkeypatch.setenv("HF_API_KEY", "k")
+    monkeypatch.setenv("HF_API_SECRET", "s")
+    monkeypatch.setattr(hf.requests, "get", lambda *args, **kwargs: FakeResponse(status_code))
+    assert hf.check_api() == expected
+
+
+def test_check_api_network_error(monkeypatch):
+    monkeypatch.setenv("HF_API_KEY", "k")
+    monkeypatch.setenv("HF_API_SECRET", "s")
+
+    def fail(*args, **kwargs):
+        raise requests.ConnectTimeout("blockiert")
+
+    monkeypatch.setattr(hf.requests, "get", fail)
+    assert "Firewall" in hf.check_api()
+
+
 def test_character_status_updates_file(characters_file, no_env_file, monkeypatch, capsys):
     monkeypatch.setattr(hf, "make_session", lambda: FakeSession([
         FakeResponse(200, {"id": "ref-123", "status": "in_progress"}),

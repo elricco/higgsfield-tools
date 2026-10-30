@@ -18,6 +18,12 @@ Nur bei Bedarf lesen. Kurzfassung steht in [SKILL.md](SKILL.md).
 | `run <model_id> --prompt ... [--timeout] [--out]` | wie `download` |
 | `catalog update [--docs-file PATH]` | baut `catalog.json` aus `GET /models` + Doku |
 | `prices [Filter wie models]` | schreibt `prices.json`, Ausgabe nur Zähler |
+| `character create <Name> <bilder...> [--model-version v2]` | Soul-ID-Training starten (2,50 $) |
+| `character status <Name>` / `character list` | Trainingsstatus / lokal bekannte Charaktere |
+| `character add <Name> <ID>` | vorhandene ID lokal eintragen (prüft sie kostenlos) |
+| `doctor` | prüft Zugangsdaten, API, Doku, Katalog-Stand |
+
+Generierungs-Optionen zusätzlich: `--image-urls A B ...` (Edit-Modelle), `--character <Name>` (SOUL).
 
 `--param` liest Werte als JSON: `duration=5` → Zahl, `enhance_prompt=true` → bool, `aspect_ratio=16:9` → Text.
 Reihenfolge im Body: Defaults aus `models.json` → `--prompt`/`--image-url` → `--param`.
@@ -26,12 +32,16 @@ Exit-Codes: `0` ok, `1` Fehler oder Job `failed`/`nsfw`/`canceled`, `2` Zugangsd
 
 ## Dateien
 
+Alle Dateien außer `outputs/` liegen im Repo `higgsfield-tools` (dort, wohin `~/.local/bin/hf` zeigt),
+unabhängig vom aktuellen Ordner.
+
 | Datei | Inhalt | Gepflegt |
 |---|---|---|
+| `characters.json` | Charakter-Name → Soul-ID (nicht in Git) | `character create/add` |
 | `catalog.json` | alle Modelle: Titel, Operationen, Parameter, Doku-Notizen | `catalog update` |
 | `prices.json` | Preis je Modell mit Datum und dem verwendeten Platzhalter-Body | `prices` |
 | `models.json` | eigene Testnotizen + Standardparameter getesteter Modelle | von Hand |
-| `outputs/` | Downloads: `<datum>_<modell>_<request_id>[_n].<endung>` | automatisch |
+| `./outputs/` (aktueller Ordner) | Downloads: `<datum>_<modell>_<request_id>[_n].<endung>` | automatisch |
 | `.hf-history.json` | request_id → Modell (für Dateinamen) | automatisch |
 
 Preise in `prices.json` gelten für Platzhalter-Eingaben mit Default-Parametern. Für echte Jobs immer `estimate` mit den tatsächlichen Parametern.
@@ -43,7 +53,7 @@ Preise in `prices.json` gelten für Platzhalter-Eingaben mit Default-Parametern.
 - Status: `queued` → `in_progress` → `completed` | `failed` | `nsfw` | `canceled`. `failed`/`nsfw` werden nicht berechnet.
 - Ausgabe: Bilder `images: [{url}]`, Videos `video: {url}`, Audio `audio`/`audios`. Dateien 7 Tage abrufbar (`expires_at`).
 - `submit` sendet einen `Idempotency-Key`; Retries erzeugen keine Doppel-Jobs.
-- Abbruch nur solange `queued`: `POST /requests/<id>/cancel` (`hf.py cancel`), sonst `400`.
+- Abbruch nur solange `queued`: `POST /requests/<id>/cancel` (`hf cancel`), sonst `400`.
 - Upload: `POST /files/generate-upload-url {"content_type"}` → `PUT` an `upload_url` mit `upload_headers`, ohne Zugangsdaten → `public_url` (CloudFront). Typen: jpeg, png, webp, gif, wav, mp4.
 - Token-abgerechnete Modelle (z. B. Seedance 2.5, Kling 4.0 reference/video-edit) liefern bei `estimate` keinen Betrag, sondern eine Preisbeschreibung pro Sekunde/Auflösung.
 - In der Doku fehlen teils Pflichtfelder in `required`; die API nennt sie im 400-Fehler.
