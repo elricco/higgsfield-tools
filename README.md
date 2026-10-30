@@ -67,7 +67,8 @@ hf download <request_id>
 hf run kling-video/v2.5-turbo/standard/image-to-video --prompt "slow camera push in" --image-url ./photo.jpg
 
 # Recurring character
-hf character create Mila image1.png image2.png ... --model-version v2
+hf character views base.png --details "dark curly hair tied back, green eyes" --max-usd 0.20
+hf character create Mila base.png outputs/*.png --model-version v2 --max-usd 2.50
 hf run higgsfield-ai/soul/v2/standard --character Mila --prompt "..."
 
 # What did today cost?
@@ -98,7 +99,7 @@ Next to every downloaded file there is a `.json` sidecar with prompt, parameters
 | `gallery [--scan FOLDER] [--no-open]` | HTML overview of all results, opens in the browser |
 | `cancel <request_id>` | cancel a job while it is still `queued` |
 | `upload <file>` | upload a local file, prints its public URL |
-| `character create\|status\|list\|add` | train and manage Soul ID characters |
+| `character views\|create\|status\|list\|add` | create training views, train and manage Soul ID characters |
 | `doctor` | check the setup: credentials, API, docs, catalog |
 
 Generation commands also accept `--image-urls A B ...` (edit models; local files are uploaded) and

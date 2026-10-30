@@ -20,7 +20,8 @@ Only read when needed. The short version is in [SKILL.md](SKILL.md).
 | `spend [--days N]` | `{"since", "estimated_usd", "by_model", "jobs", "running", "not_charged", "price_unknown", "untracked"}` |
 | `catalog update [--docs-file PATH]` | builds `catalog.json` from `GET /models` + docs |
 | `prices [filters like models]` | writes `prices.json`, output only counters |
-| `character create <name> <images...> [--model-version v2]` | start Soul ID training ($2.50) |
+| `character create <name> <images...> [--model-version v2] [--max-usd USD]` | start Soul ID training ($2.50), `{"name", "id", "status", "usd"}` |
+| `character views <base> [--details TEXT] [--views ...] [--max-usd USD] [--out] [--open]` | 5 training views from one portrait, `{"base", "views": [{"view", "request_id", "status", "files"}], "usd"}`; `--max-usd` applies to the total |
 | `character status <name>` / `character list` | training status / locally known characters |
 | `character add <name> <id>` | register an existing ID locally (checks it for free) |
 | `doctor` | checks credentials, API, docs, catalog age |

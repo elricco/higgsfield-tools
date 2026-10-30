@@ -66,6 +66,27 @@ POLL_MAX_DELAY = 10.0
 UPLOAD_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif", "audio/wav", "audio/x-wav", "video/mp4"}
 # Uploads of large videos may take longer than normal API calls.
 UPLOAD_TIMEOUT = 300
+# Endpoint name for the price of a Soul ID training (fixed price, found via estimate).
+SOUL_ID_ESTIMATE = "soul-id"
+# Edit model and image settings for 'character views' (tested with the character "Mila").
+VIEWS_MODEL = "alibaba/qwen-image-3/edit"
+VIEWS_PARAMS = ["aspect_ratio=3:4", "resolution=1k"]
+# Directions are described by the side of the IMAGE: "turn to her left" gave the wrong side.
+CHARACTER_VIEWS = {
+    "three-quarter-left": "Three-quarter view: the nose points toward the LEFT edge of the image, "
+                          "head turned about 45 degrees, eyes looking past the camera to the left.",
+    "profile-left": "Full side profile: the nose points toward the LEFT edge of the image, "
+                    "head turned 90 degrees, one ear visible.",
+    "three-quarter-right": "Three-quarter view: the nose points toward the RIGHT edge of the image, "
+                           "head turned about 45 degrees, eyes looking past the camera to the right.",
+    "profile-right": "Full side profile: the nose points toward the RIGHT edge of the image, "
+                     "head turned 90 degrees, one ear visible.",
+    "smiling": "Facing the camera with a gentle natural smile, warm golden late-afternoon light from the side.",
+}
+# Appended to every view so the edit model keeps the identity.
+VIEWS_KEEP = ("Same person as in the reference image: identical face, identical facial proportions, "
+              "same hairstyle and hair color, same skin details, same eye color, same clothing. "
+              "Head and shoulders, plain light grey background, soft even daylight, photorealistic studio photo.")
 # File extensions in case the URL does not reveal one.
 FALLBACK_EXTENSIONS = {"images": ".jpg", "video": ".mp4", "audio": ".mp3", "audios": ".mp3"}
 
@@ -431,10 +452,22 @@ def cmd_character_create(args: argparse.Namespace) -> dict:
         raise CliError("Soul ID needs 1 to 100 images.")
     if args.name.lower() in (name.lower() for name in load_characters()):
         raise CliError(f"A character '{args.name}' already exists.")
+    max_usd = max_usd_limit(args)
     session = make_session()
     urls = [resolve_input_url(value, session) for value in args.images]
-    result = api_request(session, "POST", "/v1/custom-references",
-                         json_body=character_payload(args.name, args.model_version, urls))
+    payload = character_payload(args.name, args.model_version, urls)
+    try:
+        cost = estimate_cost(session, SOUL_ID_ESTIMATE, payload)
+    except CliError:
+        if max_usd is not None:
+            raise
+        cost = {"usd": None, "pricing": None}
+    check_budget(cost, max_usd)
+    result = api_request(session, "POST", "/v1/custom-references", json_body=payload)
+    # The training goes into the job log as well, so that 'hf spend' counts it.
+    update_job(result["id"], model=SOUL_ID_ESTIMATE, prompt=f"Soul ID training: {args.name}",
+               usd=cost["usd"], submitted=datetime.now().isoformat(timespec="seconds"),
+               status=result.get("status"))
     save_character(args.name, {
         "id": result["id"],
         "model_version": args.model_version,
@@ -442,13 +475,15 @@ def cmd_character_create(args: argparse.Namespace) -> dict:
         "created": date.today().isoformat(),
         "images": [str(value) for value in args.images],
     })
-    return {"name": args.name, "id": result["id"], "status": result.get("status")}
+    return {"name": args.name, "id": result["id"], "status": result.get("status"), "usd": cost["usd"]}
 
 
 def cmd_character_status(args: argparse.Namespace) -> dict:
     character = find_character(args.name)
     result = api_request(make_session(), "GET", f"/v1/custom-references/{character['id']}")
     save_character(character["name"], {"status": result.get("status")})
+    if character["id"] in load_history():
+        update_job(character["id"], status=result.get("status"))
     output = {"name": character["name"], "id": character["id"], "status": result.get("status")}
     if result.get("status") == "failed":
         output["error"] = result.get("error") or "Training failed."
@@ -725,6 +760,68 @@ def cmd_run(args: argparse.Namespace) -> dict:
     files = save_outputs(result, job, args.out)
     refresh_gallery(args.open)
     return {"request_id": result["request_id"], "status": "completed", "files": files, "usd": submitted["usd"]}
+
+
+def run_many(session: requests.Session, jobs: list[argparse.Namespace], timeout: int, out_dir: Path) -> list[dict]:
+    """Submits several jobs, waits for all of them and downloads the results.
+
+    All jobs are submitted first, so Higgsfield works on them at the same time.
+    A failing job does not stop the others; it gets an "error" entry instead.
+    """
+    entries = []
+    for job_args in jobs:
+        try:
+            submitted = submit_generation(session, job_args)
+            entries.append({"request_id": submitted["request_id"], "usd": submitted["usd"]})
+        except CliError as error:
+            entries.append({"error": str(error)})
+    for entry in entries:
+        if "error" in entry:
+            continue
+        try:
+            result = poll_until_done(session, entry["request_id"], timeout)
+            record_status(result)
+            entry["status"] = result.get("status")
+            if entry["status"] == "completed":
+                entry["files"] = save_outputs(result, load_history().get(entry["request_id"], {}), out_dir)
+            else:
+                entry["error"] = compact_status(result)["error"]
+        except CliError as error:
+            entry["error"] = str(error)
+    return entries
+
+
+def summarize_many(entries: list[dict]) -> dict:
+    """Total cost and an overall "error" if at least one job failed."""
+    output = {"usd": round(sum(entry.get("usd") or 0 for entry in entries), 3)}
+    failed = sum(1 for entry in entries if "error" in entry)
+    if failed:
+        output["error"] = f"{failed} of {len(entries)} jobs failed."
+    return output
+
+
+def view_args(view: str, base_url: str, args: argparse.Namespace) -> argparse.Namespace:
+    """The arguments for one view, as if typed as 'hf run ...'."""
+    prompt = " ".join(part for part in (CHARACTER_VIEWS[view], args.details, VIEWS_KEEP) if part)
+    return argparse.Namespace(model_id=args.model, prompt=prompt, image_url=None, image_urls=[base_url],
+                              character=None, param=list(VIEWS_PARAMS), max_usd=None)
+
+
+def cmd_character_views(args: argparse.Namespace) -> dict:
+    """Creates the views for a Soul ID training from one base portrait."""
+    session = make_session()
+    # Upload once, then all views use the same URL.
+    base_url = resolve_input_url(args.base, session)
+    jobs = [view_args(view, base_url, args) for view in args.views]
+    # Check the price for all views together before anything is submitted.
+    cost = estimate_cost(session, args.model, build_payload(jobs[0]))
+    total = {"usd": cost["usd"] * len(jobs) if cost["usd"] is not None else None, "pricing": cost["pricing"]}
+    check_budget(total, max_usd_limit(args))
+    entries = run_many(session, jobs, args.timeout, args.out)
+    for view, entry in zip(args.views, entries):
+        entry["view"] = view
+    refresh_gallery(args.open)
+    return {"base": str(args.base), "views": entries, **summarize_many(entries)}
 
 
 def cmd_spend(args: argparse.Namespace) -> dict:
@@ -1112,12 +1209,21 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("character", parents=[common], help="train and manage Soul ID characters")
     character_sub = p.add_subparsers(dest="character_command", required=True)
-    p = character_sub.add_parser("create", parents=[common], help="train a character from images (costs money!)")
+    p = character_sub.add_parser("create", parents=[common, budget], help="train a character from images (costs money!)")
     p.add_argument("name")
     p.add_argument("images", nargs="+", help="image URLs or local files (1-100)")
     p.add_argument("--model-version", choices=["v1", "v2", "cinema"], default="v2",
                    help="SOUL family the character is used with (default: v2)")
     p.set_defaults(func=cmd_character_create)
+    p = character_sub.add_parser("views", parents=[common, budget, results],
+                                 help="create training views from one base portrait (costs money!)")
+    p.add_argument("base", help="base portrait, frontal: URL or local file")
+    p.add_argument("--details", help="features to keep, e.g. 'dark curly hair tied back, freckles, green eyes'")
+    p.add_argument("--views", nargs="+", choices=list(CHARACTER_VIEWS), default=list(CHARACTER_VIEWS),
+                   help="which views (default: all five)")
+    p.add_argument("--model", default=VIEWS_MODEL, help=f"edit model (default: {VIEWS_MODEL})")
+    p.add_argument("--timeout", type=int, default=900)
+    p.set_defaults(func=cmd_character_views)
     p = character_sub.add_parser("status", parents=[common], help="query the training status")
     p.add_argument("name", help="name or ID")
     p.set_defaults(func=cmd_character_status)

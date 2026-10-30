@@ -565,14 +565,27 @@ def test_character_payload():
 
 def test_character_create_saves_id(tmp_path, monkeypatch, no_env_file, capsys):
     monkeypatch.setattr(hf, "CHARACTERS_FILE", tmp_path / "characters.json")
-    session = FakeSession([FakeResponse(200, {"id": "ref-9", "status": "queued"})])
+    session = FakeSession([FakeResponse(200, {"usd": "2.500"}), FakeResponse(200, {"id": "ref-9", "status": "queued"})])
     monkeypatch.setattr(hf, "make_session", lambda: session)
 
     assert hf.main(["character", "create", "Otto", "https://x/1.jpg", "https://x/2.jpg"]) == 0
-    assert json.loads(capsys.readouterr().out) == {"name": "Otto", "id": "ref-9", "status": "queued"}
-    assert session.calls[0]["url"].endswith("/v1/custom-references")
-    assert len(session.calls[0]["json"]["input_images"]) == 2
+    assert json.loads(capsys.readouterr().out) == {"name": "Otto", "id": "ref-9", "status": "queued", "usd": 2.5}
+    assert session.calls[0]["url"].endswith("/estimate/soul-id")
+    assert session.calls[1]["url"].endswith("/v1/custom-references")
+    assert len(session.calls[1]["json"]["input_images"]) == 2
     assert hf.load_characters()["Otto"]["id"] == "ref-9"
+    # The training cost ends up in the job log, so 'hf spend' counts it.
+    assert hf.load_history()["ref-9"]["usd"] == 2.5
+    assert hf.load_history()["ref-9"]["model"] == "soul-id"
+
+
+def test_character_create_respects_max_usd(tmp_path, monkeypatch, no_env_file, capsys):
+    monkeypatch.setattr(hf, "CHARACTERS_FILE", tmp_path / "characters.json")
+    session = FakeSession([FakeResponse(200, {"usd": "2.500"})])
+    monkeypatch.setattr(hf, "make_session", lambda: session)
+    assert hf.main(["character", "create", "Otto", "https://x/1.jpg", "--max-usd", "1"]) == 1
+    assert len(session.calls) == 1
+    assert hf.load_characters() == {}
 
 
 def test_character_create_rejects_duplicate_name(characters_file, no_env_file, capsys):
@@ -811,3 +824,52 @@ def test_run_rebuilds_gallery(sleeps, models_file, no_env_file, no_max_usd, tmp_
     assert json.loads(capsys.readouterr().out)["usd"] == 0.25
     assert "a lake" in (tmp_path / "gallery.html").read_text()
     assert len(browser_calls) == 1
+
+
+# --- Character views and run_many -------------------------------------------
+
+
+def views_session(*poll_results):
+    """Estimate for the budget check, then estimate + submit per view, then one poll per view."""
+    responses = [FakeResponse(200, {"usd": "0.040"})]
+    for number, _ in enumerate(poll_results, start=1):
+        responses += [FakeResponse(200, {"usd": "0.040"}),
+                      FakeResponse(200, {"request_id": f"v{number}", "status": "queued"})]
+    return FakeSession(responses + [FakeResponse(200, body) for body in poll_results])
+
+
+def test_character_views_creates_selected_views(sleeps, no_env_file, no_max_usd, tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(hf, "MODELS_FILE", tmp_path / "models.json")
+    (tmp_path / "models.json").write_text("{}")
+    monkeypatch.setattr(hf, "download_file", lambda url, target: target.write_bytes(b"IMG"))
+    session = views_session(
+        {"request_id": "v1", "status": "completed", "images": [{"url": "https://cdn/1.png"}]},
+        {"request_id": "v2", "status": "nsfw"},
+    )
+    monkeypatch.setattr(hf, "make_session", lambda: session)
+
+    code = hf.main(["character", "views", "https://x/base.png", "--views", "profile-left", "smiling",
+                    "--details", "green eyes", "--out", str(tmp_path / "out")])
+
+    output = json.loads(capsys.readouterr().out)
+    assert code == 1
+    assert output["error"] == "1 of 2 jobs failed."
+    assert output["usd"] == 0.08
+    assert output["views"][0]["view"] == "profile-left"
+    assert len(output["views"][0]["files"]) == 1
+    assert output["views"][1]["status"] == "nsfw"
+    submitted = [call["json"] for call in session.calls if call["url"].endswith("/alibaba/qwen-image-3/edit")]
+    assert submitted[0]["image_urls"] == ["https://x/base.png"]
+    assert "LEFT edge" in submitted[0]["prompt"] and "green eyes" in submitted[0]["prompt"]
+    assert submitted[0]["aspect_ratio"] == "3:4"
+
+
+def test_character_views_checks_total_budget(sleeps, no_env_file, no_max_usd, tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(hf, "MODELS_FILE", tmp_path / "models.json")
+    (tmp_path / "models.json").write_text("{}")
+    session = FakeSession([FakeResponse(200, {"usd": "0.040"})])
+    monkeypatch.setattr(hf, "make_session", lambda: session)
+    # 5 views x $0.04 = $0.20 > $0.10
+    assert hf.main(["character", "views", "https://x/base.png", "--max-usd", "0.1"]) == 1
+    assert "$0.200" in json.loads(capsys.readouterr().out)["error"]
+    assert len(session.calls) == 1

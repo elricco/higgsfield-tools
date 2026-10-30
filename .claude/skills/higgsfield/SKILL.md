@@ -77,12 +77,14 @@ family (`model_version` v2 → `higgsfield-ai/soul/v2/standard`); sets `custom_r
 
 Creating a new character (tested workflow, ~$2.75 total):
 1. Base portrait: `soul/v2/standard`, frontal, plain background, `batch_size=4`, the user picks one (~$0.02).
-2. Further views **from this one image** via edit: `alibaba/qwen-image-3/edit --image-urls <base>`, $0.04 each.
-   Prompt: view + "Same woman as in the reference image: identical face, … same hair, same top".
-   Give the direction by **image side** ("nose points toward the RIGHT edge of the image"), not "her left" – otherwise you get the wrong side.
+2. Further views **from this one image**: `hf character views <base> --details "<hair, eyes, freckles, clothing>" --max-usd 0.20`
+   (5 views via `alibaba/qwen-image-3/edit`, $0.04 each, all in parallel). Proven set: 3/4 L, profile L, 3/4 R, profile R, smiling;
+   together with the frontal base that makes 6 training images. Single views: `--views profile-left smiling`.
+   The prompts give the direction by **image side** ("nose points toward the RIGHT edge of the image") – "her left" gave the wrong side.
    Separate text-to-image runs produce different people – do not use them.
-3. Look at the images, regenerate outliers. Proven set: profile L, 3/4 L, frontal, 3/4 R, profile R, frontal smiling.
-4. `hf character create <name> <images...> --model-version v2` ($2.50, get confirmation first), then `character status <name>`.
+3. Look at the images (`hf gallery`), regenerate outliers with `--views <name>`.
+4. `hf character create <name> <images...> --model-version v2 --max-usd 2.50` ($2.50, get confirmation first), then `character status <name>`.
+   The training cost is logged and shows up in `hf spend`.
    Training takes ~7 min (`not_ready` → `in_progress` → `completed`).
 
 Learnings (test "Mila", 2026-10-30): the identity holds reliably in close-ups and medium shots, also with a new expression

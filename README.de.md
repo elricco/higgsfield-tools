@@ -69,7 +69,8 @@ hf download <request_id>
 hf run kling-video/v2.5-turbo/standard/image-to-video --prompt "slow camera push in" --image-url ./foto.jpg
 
 # Wiederkehrender Charakter
-hf character create Mila bild1.png bild2.png ... --model-version v2
+hf character views basis.png --details "dark curly hair tied back, green eyes" --max-usd 0.20
+hf character create Mila basis.png outputs/*.png --model-version v2 --max-usd 2.50
 hf run higgsfield-ai/soul/v2/standard --character Mila --prompt "..."
 
 # Was hat heute gekostet?
@@ -100,7 +101,7 @@ Neben jeder heruntergeladenen Datei liegt eine `.json` mit Prompt, Parametern, M
 | `gallery [--scan ORDNER] [--no-open]` | HTML-Übersicht aller Ergebnisse, öffnet im Browser |
 | `cancel <request_id>` | Job abbrechen, solange er `queued` ist |
 | `upload <datei>` | lokale Datei hochladen, gibt öffentliche URL aus |
-| `character create\|status\|list\|add` | Soul-ID-Charaktere trainieren und verwalten |
+| `character views\|create\|status\|list\|add` | Trainingsansichten erzeugen, Soul-ID-Charaktere trainieren und verwalten |
 | `doctor` | Einrichtung prüfen: Zugangsdaten, API, Doku, Katalog |
 
 Generierungen kennen außerdem `--image-urls A B ...` (Edit-Modelle; lokale Dateien werden hochgeladen) und
