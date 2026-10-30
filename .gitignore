@@ -11,3 +11,6 @@ outputs/
 __pycache__/
 *.pyc
 .pytest_cache/
+
+# Lokale Zuordnung request_id -> Modell
+.hf-history.json

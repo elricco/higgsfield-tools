@@ -12,7 +12,9 @@ import sys
 import time
 import traceback
 import uuid
+from datetime import date
 from pathlib import Path
+from urllib.parse import urlparse
 
 import requests
 
@@ -28,6 +30,8 @@ TERMINAL_STATUSES = {"completed", "failed", "nsfw", "canceled"}
 PROJECT_DIR = Path(__file__).parent
 MODELS_FILE = PROJECT_DIR / "models.json"
 ENV_FILE = PROJECT_DIR / ".env"
+# Merkt sich, welches Modell zu welcher request_id gehört (für Dateinamen).
+HISTORY_FILE = PROJECT_DIR / ".hf-history.json"
 
 # Sekunden, die ein einzelner HTTP-Aufruf höchstens dauern darf.
 HTTP_TIMEOUT = 30
@@ -35,6 +39,11 @@ HTTP_TIMEOUT = 30
 MAX_ATTEMPTS = 4
 # HTTP-Status-Codes, bei denen sich ein neuer Versuch lohnt.
 RETRY_STATUS_CODES = {429, 500, 502, 503, 504}
+# Polling laut Doku: mit 2 s beginnen, langsam bis 10 s steigern.
+POLL_START_DELAY = 2.0
+POLL_MAX_DELAY = 10.0
+# Dateiendungen, falls die URL keine verrät.
+FALLBACK_EXTENSIONS = {"images": ".jpg", "video": ".mp4", "audio": ".mp3", "audios": ".mp3"}
 
 
 # --- Fehler und Ausgabe -----------------------------------------------------
@@ -97,6 +106,22 @@ def load_models() -> dict:
         raise CliError(f"{MODELS_FILE.name} nicht gefunden.")
     except json.JSONDecodeError as error:
         raise CliError(f"{MODELS_FILE.name} ist kein gültiges JSON: {error}")
+
+
+def load_history() -> dict:
+    """Liest {request_id: model_id} aus der History-Datei (leer, falls es sie nicht gibt)."""
+    if not HISTORY_FILE.exists():
+        return {}
+    try:
+        return json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+
+
+def remember_request(request_id: str, model_id: str) -> None:
+    history = load_history()
+    history[request_id] = model_id
+    HISTORY_FILE.write_text(json.dumps(history, indent=2), encoding="utf-8")
 
 
 # --- Parameter --------------------------------------------------------------
@@ -214,6 +239,113 @@ def api_request(
     raise CliError("Unerwarteter Fehler in api_request.")
 
 
+def download_file(url: str, target: Path) -> None:
+    """Lädt eine Datei in Stücken herunter (spart Speicher bei großen Videos).
+
+    Bewusst ohne Session: Die Zugangsdaten gehen nur an api.higgsfield.ai,
+    nicht an das CDN, auf dem die Ergebnisse liegen.
+    """
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        try:
+            # 'with' sorgt dafür, dass die Verbindung danach sicher geschlossen wird.
+            with requests.get(url, stream=True, timeout=HTTP_TIMEOUT) as response:
+                if response.status_code in RETRY_STATUS_CODES and attempt < MAX_ATTEMPTS:
+                    time.sleep(retry_delay(attempt))
+                    continue
+                if response.status_code >= 400:
+                    raise CliError(f"Download fehlgeschlagen: HTTP {response.status_code}")
+                with target.open("wb") as file:
+                    for chunk in response.iter_content(chunk_size=1024 * 1024):
+                        file.write(chunk)
+                return
+        except (requests.ConnectionError, requests.Timeout) as error:
+            if attempt == MAX_ATTEMPTS:
+                raise CliError(f"Download fehlgeschlagen: {type(error).__name__}")
+            time.sleep(retry_delay(attempt))
+
+
+# --- Ergebnisse -------------------------------------------------------------
+
+
+def compact_status(result: dict) -> dict:
+    """Reduziert eine Status-Antwort auf die wichtigen Felder."""
+    output = {"request_id": result.get("request_id"), "status": result.get("status")}
+    if result.get("error"):
+        output["error"] = result["error"]
+    elif result.get("status") in {"failed", "nsfw", "canceled"}:
+        # Damit main() einen Exit-Code ungleich 0 liefert.
+        output["error"] = f"Job beendet mit Status '{result['status']}'"
+    return output
+
+
+def extract_outputs(result: dict) -> list[tuple[str, str]]:
+    """Sammelt alle Ergebnis-URLs als Liste von (feldname, url).
+
+    Bilder kommen als Liste ("images"), Videos als einzelnes Objekt ("video").
+    "audio" und "audios" können dieselbe Datei enthalten – Duplikate fallen weg.
+    """
+    outputs = []
+    seen = set()
+    for field in ("images", "video", "audio", "audios"):
+        value = result.get(field)
+        if not value:
+            continue
+        # Einzelnes Objekt in eine Liste packen, damit beide Fälle gleich laufen.
+        items = value if isinstance(value, list) else [value]
+        for item in items:
+            url = item.get("url")
+            if url and url not in seen:
+                seen.add(url)
+                outputs.append((field, url))
+    return outputs
+
+
+def output_filename(model_id: str, request_id: str, field: str, url: str,
+                    index: int, total: int, day: date) -> str:
+    """Baut den Dateinamen: <datum>_<modell>_<request_id>[_<nr>].<endung>"""
+    model_slug = model_id.replace("/", "-")
+    extension = Path(urlparse(url).path).suffix or FALLBACK_EXTENSIONS.get(field, "")
+    number = f"_{index}" if total > 1 else ""
+    return f"{day:%Y-%m-%d}_{model_slug}_{request_id}{number}{extension}"
+
+
+def poll_until_done(session: requests.Session, request_id: str, timeout: int) -> dict:
+    """Fragt den Status ab, bis der Job fertig ist oder die Zeit abläuft."""
+    # time.monotonic() ist eine Uhr, die nie zurückspringt – ideal für Zeitmessung.
+    deadline = time.monotonic() + timeout
+    delay = POLL_START_DELAY
+    while True:
+        result = api_request(session, "GET", f"/requests/{request_id}/status")
+        if result.get("status") in TERMINAL_STATUSES:
+            return result
+        if time.monotonic() + delay > deadline:
+            raise CliError(
+                f"Timeout nach {timeout} s, Job {request_id} läuft noch "
+                f"(Status '{result.get('status')}'). Später mit 'wait' fortsetzen."
+            )
+        # Etwas Zufall (Jitter), damit viele Clients nicht im Gleichtakt abfragen.
+        time.sleep(delay + random.uniform(0, 0.5))
+        delay = min(delay * 1.5, POLL_MAX_DELAY)
+
+
+def save_outputs(result: dict, model_id: str, out_dir: Path) -> list[str]:
+    """Lädt alle Ergebnisse herunter und gibt die Dateipfade zurück."""
+    outputs = extract_outputs(result)
+    if not outputs:
+        raise CliError("Die Antwort enthält keine Ergebnisdateien.")
+    # parents=True legt auch Zwischenordner an, exist_ok=True ignoriert vorhandene.
+    out_dir.mkdir(parents=True, exist_ok=True)
+    paths = []
+    # enumerate(..., start=1) liefert Nummer und Element: (1, a), (2, b), ...
+    for index, (field, url) in enumerate(outputs, start=1):
+        name = output_filename(model_id, result["request_id"], field, url,
+                               index, len(outputs), date.today())
+        target = out_dir / name
+        download_file(url, target)
+        paths.append(str(target))
+    return paths
+
+
 # --- Befehle ----------------------------------------------------------------
 # Jede Funktion bekommt die geparsten Argumente (args) und gibt ein Dictionary
 # zurück. main() kümmert sich um die Ausgabe.
@@ -229,6 +361,53 @@ def cmd_estimate(args: argparse.Namespace) -> dict:
     return output
 
 
+def submit_generation(session: requests.Session, args: argparse.Namespace) -> dict:
+    """Schickt einen Job ab und merkt sich das Modell zur request_id."""
+    payload = build_payload(args)
+    # Ein Idempotency-Key pro Job: Wiederholt api_request den Aufruf nach einem
+    # Timeout, erkennt der Server ihn und legt keinen zweiten (bezahlten) Job an.
+    headers = {"Idempotency-Key": str(uuid.uuid4())}
+    result = api_request(session, "POST", f"/{args.model_id}", json_body=payload, headers=headers)
+    remember_request(result["request_id"], args.model_id)
+    return result
+
+
+def cmd_submit(args: argparse.Namespace) -> dict:
+    result = submit_generation(make_session(), args)
+    return result if args.verbose else compact_status(result)
+
+
+def cmd_status(args: argparse.Namespace) -> dict:
+    result = api_request(make_session(), "GET", f"/requests/{args.request_id}/status")
+    return result if args.verbose else compact_status(result)
+
+
+def cmd_wait(args: argparse.Namespace) -> dict:
+    result = poll_until_done(make_session(), args.request_id, args.timeout)
+    return result if args.verbose else compact_status(result)
+
+
+def cmd_download(args: argparse.Namespace) -> dict:
+    result = api_request(make_session(), "GET", f"/requests/{args.request_id}/status")
+    if result.get("status") != "completed":
+        output = compact_status(result)
+        output.setdefault("error", f"Job ist noch nicht fertig (Status '{result.get('status')}').")
+        return output
+    model_id = load_history().get(args.request_id, "unknown")
+    files = save_outputs(result, model_id, args.out)
+    return {"request_id": args.request_id, "status": "completed", "files": files}
+
+
+def cmd_run(args: argparse.Namespace) -> dict:
+    session = make_session()
+    submitted = submit_generation(session, args)
+    result = poll_until_done(session, submitted["request_id"], args.timeout)
+    if result.get("status") != "completed":
+        return compact_status(result)
+    files = save_outputs(result, args.model_id, args.out)
+    return {"request_id": result["request_id"], "status": "completed", "files": files}
+
+
 def cmd_models(args: argparse.Namespace) -> dict:
     models = load_models()
     if args.verbose:
@@ -240,10 +419,6 @@ def cmd_models(args: argparse.Namespace) -> dict:
             for model_id, info in models.items()
         ]
     }
-
-
-def not_implemented(args: argparse.Namespace) -> dict:
-    raise CliError(f"Befehl '{args.command}' ist noch nicht implementiert.")
 
 
 # --- Argumente --------------------------------------------------------------
@@ -271,26 +446,26 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_estimate)
 
     p = sub.add_parser("submit", parents=[common, generation], help="Job abschicken")
-    p.set_defaults(func=not_implemented)
+    p.set_defaults(func=cmd_submit)
 
     p = sub.add_parser("status", parents=[common], help="Status eines Jobs")
     p.add_argument("request_id")
-    p.set_defaults(func=not_implemented)
+    p.set_defaults(func=cmd_status)
 
     p = sub.add_parser("wait", parents=[common], help="warten, bis ein Job fertig ist")
     p.add_argument("request_id")
     p.add_argument("--timeout", type=int, default=600, help="Sekunden (Standard: 600)")
-    p.set_defaults(func=not_implemented)
+    p.set_defaults(func=cmd_wait)
 
     p = sub.add_parser("download", parents=[common], help="Ergebnisdateien herunterladen")
     p.add_argument("request_id")
     p.add_argument("--out", type=Path, default=Path("outputs"))
-    p.set_defaults(func=not_implemented)
+    p.set_defaults(func=cmd_download)
 
     p = sub.add_parser("run", parents=[common, generation], help="submit + wait + download")
     p.add_argument("--timeout", type=int, default=600)
     p.add_argument("--out", type=Path, default=Path("outputs"))
-    p.set_defaults(func=not_implemented)
+    p.set_defaults(func=cmd_run)
 
     p = sub.add_parser("models", parents=[common], help="bekannte Modelle auflisten")
     p.set_defaults(func=cmd_models)
@@ -312,7 +487,8 @@ def main(argv: list[str] | None = None) -> int:
         print_json({"error": str(error)})
         return error.exit_code
     print_json(result)
-    return 0
+    # Ein Ergebnis mit "error" (z. B. Job failed) zählt als Fehlschlag.
+    return 1 if "error" in result else 0
 
 
 # Dieser Block läuft nur, wenn man die Datei direkt startet (python hf.py ...),
