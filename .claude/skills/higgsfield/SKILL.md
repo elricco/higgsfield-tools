@@ -60,6 +60,26 @@ Datei automatisch hoch (jpg, png, webp, gif). Nur die URL holen: `hf.py upload <
 
 **Abbrechen:** `hf.py cancel <request_id>` – nur solange der Job `queued` ist; ein abgebrochener Job wird erstattet.
 
+## Wiederkehrende Charaktere (Soul ID)
+
+Vorhandene Charaktere: `hf.py character list`. Nutzen mit `--character <Name>` bei SOUL-Modellen der passenden
+Familie (`model_version` v2 → `higgsfield-ai/soul/v2/standard`); setzt `custom_reference_id` und Stärke 1.0
+(ändern: `--param custom_reference_strength=0.7`, nie 0).
+
+Neuen Charakter anlegen (getesteter Ablauf, ~2,75 $ gesamt):
+1. Basisporträt: `soul/v2/standard`, frontal, schlichter Hintergrund, `batch_size=4`, User wählt eins (~0,02 $).
+2. Weitere Ansichten **aus diesem einen Bild** per Edit: `alibaba/qwen-image-3/edit --image-urls <basis>`, je 0,04 $.
+   Prompt: Ansicht + „Same woman as in the reference image: identical face, … same hair, same top“.
+   Richtung über die **Bildseite** angeben („nose points toward the RIGHT edge of the image“), nicht „her left“ – sonst falsche Seite.
+   Getrennte Text-zu-Bild-Läufe ergeben verschiedene Personen – nicht verwenden.
+3. Bilder ansehen, Ausreißer neu erzeugen. Bewährt: Profil L, 3/4 L, frontal, 3/4 R, Profil R, frontal lächelnd.
+4. `hf.py character create <Name> <bilder...> --model-version v2` (2,50 $, vorher bestätigen lassen), dann `character status <Name>`.
+   Training dauert ~7 min (`not_ready` → `in_progress` → `completed`).
+
+Erfahrungen (Test „Mila“, 2026-10-30): Identität sitzt in Nah- und Halbnah-Aufnahmen sicher, auch mit neuem Ausdruck
+und Outfit. In Totalen ist das Gesicht zu klein zum Wiedererkennen. Frisur aus den Trainingsbildern (zurückgebunden)
+setzt sich gegen den Prompt („hair loose“) teilweise durch – gewünschte Frisuren schon in den Trainingsbildern variieren.
+
 ## Prompt-Muster (kurz)
 
 - **Bild:** Motiv → Umgebung → Licht → Stil/Kamera. *„A quiet alpine lake at sunrise, low mist, editorial photography“*
