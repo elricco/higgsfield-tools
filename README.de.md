@@ -1,5 +1,7 @@
 # hf – Higgsfield-CLI
 
+[![CI](https://github.com/elricco/higgsfield-tools/actions/workflows/ci.yml/badge.svg)](https://github.com/elricco/higgsfield-tools/actions/workflows/ci.yml)
+
 🇬🇧 [English version](README.md)
 
 Schlankes Python-CLI, um über die [Higgsfield-API](https://docs.higgsfield.ai) Bilder und Videos zu erzeugen.
@@ -149,10 +151,13 @@ Die Datendateien liegen immer im Repo, egal aus welchem Ordner `hf` aufgerufen w
 ## Tests
 
 ```bash
-.venv/bin/python -m pytest -q
+.venv/bin/python -m pytest -q     # Tests
+.venv/bin/ruff check .            # Lint
+.venv/bin/ruff format .           # Formatieren
 ```
 
 Die Tests laufen ohne Netzwerk: HTTP wird durch eine `FakeSession` ersetzt.
+GitHub Actions führt alle drei bei jedem Push aus, mit Python 3.10 und dem neuesten Python.
 
 ## Hinweise
 
