@@ -18,9 +18,14 @@ from urllib.parse import urlparse
 
 import requests
 
+# Unser eigenes Modul catalog.py (liegt im selben Ordner).
+import catalog
+
 # --- Konstanten -------------------------------------------------------------
 
 BASE_URL = "https://api.higgsfield.ai"
+# Die komplette Doku in einer Textdatei – enthält die Parameter aller Modelle.
+DOCS_FULL_URL = "https://docs.higgsfield.ai/llms-full.txt"
 
 # Status-Werte, bei denen ein Job fertig ist (egal ob Erfolg oder Fehler).
 TERMINAL_STATUSES = {"completed", "failed", "nsfw", "canceled"}
@@ -28,7 +33,11 @@ TERMINAL_STATUSES = {"completed", "failed", "nsfw", "canceled"}
 # Path(__file__).parent ist der Ordner, in dem diese Datei liegt.
 # So findet das CLI models.json auch, wenn man es aus einem anderen Ordner aufruft.
 PROJECT_DIR = Path(__file__).parent
+# Eigene Notizen und Standardparameter zu getesteten Modellen (von Hand gepflegt).
 MODELS_FILE = PROJECT_DIR / "models.json"
+# Automatisch erzeugt mit 'hf catalog update' bzw. 'hf prices'.
+CATALOG_FILE = PROJECT_DIR / "catalog.json"
+PRICES_FILE = PROJECT_DIR / "prices.json"
 ENV_FILE = PROJECT_DIR / ".env"
 # Merkt sich, welches Modell zu welcher request_id gehört (für Dateinamen).
 HISTORY_FILE = PROJECT_DIR / ".hf-history.json"
@@ -106,6 +115,27 @@ def load_models() -> dict:
         raise CliError(f"{MODELS_FILE.name} nicht gefunden.")
     except json.JSONDecodeError as error:
         raise CliError(f"{MODELS_FILE.name} ist kein gültiges JSON: {error}")
+
+
+def read_json_file(path: Path, default):
+    """Liest eine JSON-Datei oder gibt default zurück, wenn es sie nicht gibt."""
+    if not path.exists():
+        return default
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        raise CliError(f"{path.name} ist kein gültiges JSON.")
+
+
+def write_json_file(path: Path, data) -> None:
+    path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def load_catalog() -> dict:
+    data = read_json_file(CATALOG_FILE, None)
+    if data is None:
+        raise CliError("Noch kein Katalog vorhanden. Zuerst 'hf catalog update' ausführen.")
+    return data
 
 
 def load_history() -> dict:
@@ -357,6 +387,9 @@ def cmd_estimate(args: argparse.Namespace) -> dict:
     payload = build_payload(args)
     result = api_request(make_session(), "POST", f"/estimate/{args.model_id}", json_body=payload)
     output = {"model": args.model_id, "usd": result.get("usd")}
+    # Token-basierte Modelle liefern statt einer Zahl eine Preisbeschreibung.
+    if result.get("pricing_description"):
+        output["pricing"] = result["pricing_description"]
     if args.verbose:
         output["payload"] = payload
         output["response"] = result
@@ -410,17 +443,149 @@ def cmd_run(args: argparse.Namespace) -> dict:
     return {"request_id": result["request_id"], "status": "completed", "files": files}
 
 
-def cmd_models(args: argparse.Namespace) -> dict:
-    models = load_models()
-    if args.verbose:
-        return {"models": models}
-    # Kompakt: nur ID, Typ und Standardparameter.
+def filtered_models(args: argparse.Namespace) -> dict:
+    """Alle Katalog-Modelle, die zu --output/--op/--search passen."""
+    models = load_catalog()["models"]
     return {
-        "models": [
-            {"id": model_id, "type": info.get("type"), "defaults": info.get("defaults", {})}
-            for model_id, info in models.items()
-        ]
+        model_id: model
+        for model_id, model in models.items()
+        if (model.get("listed") or args.all)
+        and catalog.matches(model_id, model, args.output, args.op, args.search)
     }
+
+
+def price_summary(price: dict | None) -> dict:
+    """Kurzform eines Preis-Eintrags für die Ausgabe."""
+    if not price:
+        return {}
+    if price.get("usd") is not None:
+        return {"usd": price["usd"]}
+    if price.get("pricing"):
+        return {"usd": None, "pricing": "variabel (siehe 'hf info')"}
+    return {"usd": None, "price_error": price.get("error")}
+
+
+def cmd_models(args: argparse.Namespace) -> dict:
+    models = filtered_models(args)
+    prices = read_json_file(PRICES_FILE, {})
+    notes = load_models()
+    rows = []
+    for model_id, model in models.items():
+        row = {"id": model_id, "title": model.get("title"), "ops": model.get("operations")}
+        row.update(price_summary(prices.get(model_id)))
+        if notes.get(model_id, {}).get("tested"):
+            row["tested"] = True
+        if not model.get("documented"):
+            row["documented"] = False
+        rows.append(row)
+    if args.sort == "price":
+        # sorted(..., key=...) sortiert nach dem Wert, den die key-Funktion liefert.
+        rows.sort(key=lambda row: catalog.price_sort_key(prices.get(row["id"])))
+    if args.limit:
+        rows = rows[:args.limit]
+    return {"count": len(rows), "models": rows}
+
+
+def cmd_info(args: argparse.Namespace) -> dict:
+    models = load_catalog()["models"]
+    model = models.get(args.model_id)
+    if model is None:
+        raise CliError(f"Modell '{args.model_id}' ist nicht im Katalog. Tipp: 'hf models --search ...'")
+    output = {"id": args.model_id, **model}
+    if not args.verbose:
+        output.pop("description", None)
+    price = read_json_file(PRICES_FILE, {}).get(args.model_id)
+    if price:
+        output["price"] = price
+    own_notes = load_models().get(args.model_id)
+    if own_notes:
+        output["own_notes"] = own_notes
+    return output
+
+
+def download_docs(docs_file: Path | None) -> str:
+    """Liest llms-full.txt – aus einer lokalen Datei oder aus dem Netz."""
+    if docs_file:
+        return docs_file.read_text(encoding="utf-8")
+    response = requests.get(DOCS_FULL_URL, timeout=HTTP_TIMEOUT)
+    response.raise_for_status()
+    return response.text
+
+
+def cmd_catalog_update(args: argparse.Namespace) -> dict:
+    result = api_request(make_session(), "GET", "/models")
+    items = result.get("items", [])
+    output = {}
+    if result.get("total") and result["total"] > len(items):
+        output["warning"] = f"API meldet {result['total']} Modelle, geliefert wurden {len(items)}."
+    try:
+        docs = catalog.parse_docs(download_docs(args.docs_file))
+    except (requests.RequestException, OSError) as error:
+        # Ohne Doku geht es trotzdem – nur ohne Parameter-Details.
+        docs = {}
+        output["docs_error"] = f"Doku nicht geladen ({type(error).__name__}), Katalog ohne Parameter."
+    models = catalog.build_catalog(items, docs)
+    write_json_file(CATALOG_FILE, {"updated": date.today().isoformat(), "models": models})
+    listed = [m for m in models.values() if m["listed"]]
+    return {
+        "listed": len(listed),
+        "documented": sum(1 for m in listed if m["documented"]),
+        "only_in_docs": sorted(slug for slug, m in models.items() if not m["listed"]),
+        "file": CATALOG_FILE.name,
+        **output,
+    }
+
+
+def estimate_with_learning(session: requests.Session, model_id: str, model: dict,
+                           payload: dict, max_tries: int = 5) -> dict:
+    """Fragt den Preis ab und ergänzt fehlende Pflichtfelder automatisch.
+
+    Die Doku listet nicht immer alle Pflichtfelder. Meldet die API
+    "'video_urls' is a required property", fügen wir einen Platzhalter hinzu
+    und versuchen es erneut. Das Ergebnis zeigt so auch die echten Pflichtfelder.
+    """
+    entry = {"checked": date.today().isoformat()}
+    for _ in range(max_tries):  # "_" heißt: die Zählvariable brauchen wir nicht
+        try:
+            result = api_request(session, "POST", f"/estimate/{model_id}", json_body=payload)
+        except CliError as error:
+            field = catalog.missing_field(str(error))
+            if field and field not in payload:
+                spec = model.get("params", {}).get(field, {})
+                payload = {**payload, field: catalog.placeholder_value(field, spec)}
+                continue
+            entry.update(usd=None, error=str(error), payload=payload)
+            return entry
+        entry.update(usd=result.get("usd"), payload=payload)
+        if result.get("pricing_description"):
+            entry["pricing"] = result["pricing_description"]
+        return entry
+    entry.update(usd=None, error=f"Nach {max_tries} Versuchen noch Pflichtfelder offen.", payload=payload)
+    return entry
+
+
+def cmd_prices(args: argparse.Namespace) -> dict:
+    models = filtered_models(args)
+    if not models:
+        raise CliError("Kein Modell passt zu den Filtern.")
+    session = make_session()
+    notes = load_models()
+    prices = read_json_file(PRICES_FILE, {})
+    # Achtung: nicht "error" nennen – main() wertet diesen Schlüssel als Fehlschlag.
+    counts = {"usd": 0, "variable": 0, "failed": 0}
+    for model_id, model in models.items():
+        # Platzhalter für Pflichtfelder plus unsere getesteten Standardwerte.
+        payload = {**catalog.placeholder_payload(model), **notes.get(model_id, {}).get("defaults", {})}
+        entry = estimate_with_learning(session, model_id, model, payload)
+        prices[model_id] = entry
+        if entry.get("usd") is not None:
+            counts["usd"] += 1
+        elif entry.get("pricing"):
+            counts["variable"] += 1
+        else:
+            counts["failed"] += 1
+    write_json_file(PRICES_FILE, prices)
+    return {"checked": len(models), **counts, "file": PRICES_FILE.name}
 
 
 # --- Argumente --------------------------------------------------------------
@@ -469,8 +634,30 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--out", type=Path, default=Path("outputs"))
     p.set_defaults(func=cmd_run)
 
-    p = sub.add_parser("models", parents=[common], help="bekannte Modelle auflisten")
+    # Filter für models und prices.
+    filters = argparse.ArgumentParser(add_help=False)
+    filters.add_argument("--output", choices=["image", "video"], help="nur Bild- oder Videomodelle")
+    filters.add_argument("--op", help="Operation, z. B. text2image, image2video, text2video, video2video, image_edit")
+    filters.add_argument("--search", help="Suchwörter in ID/Titel, z. B. 'kling 4.0'")
+    filters.add_argument("--all", action="store_true", help="auch Modelle, die nur in der Doku stehen")
+
+    p = sub.add_parser("models", parents=[common, filters], help="Modelle aus dem Katalog auflisten")
+    p.add_argument("--sort", choices=["name", "price"], default="name")
+    p.add_argument("--limit", type=int, help="nur die ersten N Einträge")
     p.set_defaults(func=cmd_models)
+
+    p = sub.add_parser("info", parents=[common], help="Parameter und Preis eines Modells")
+    p.add_argument("model_id")
+    p.set_defaults(func=cmd_info)
+
+    p = sub.add_parser("prices", parents=[common, filters], help="Preise per estimate abfragen (kostenlos)")
+    p.set_defaults(func=cmd_prices)
+
+    p = sub.add_parser("catalog", parents=[common], help="Modellkatalog verwalten")
+    catalog_sub = p.add_subparsers(dest="catalog_command", required=True)
+    p = catalog_sub.add_parser("update", parents=[common], help="Katalog aus API und Doku neu aufbauen")
+    p.add_argument("--docs-file", type=Path, help="lokale llms-full.txt statt Download")
+    p.set_defaults(func=cmd_catalog_update)
 
     return parser
 

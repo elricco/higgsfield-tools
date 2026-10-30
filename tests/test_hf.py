@@ -328,12 +328,78 @@ def no_env_file(tmp_path, monkeypatch):
     monkeypatch.setattr(hf, "ENV_FILE", tmp_path / "no.env")
 
 
-def test_main_prints_one_json_line(models_file, no_env_file, capsys):
+@pytest.fixture
+def catalog_files(tmp_path, monkeypatch, models_file):
+    """Ein kleiner Katalog plus Preise im temporären Ordner."""
+    catalog_path = tmp_path / "catalog.json"
+    catalog_path.write_text(json.dumps({"updated": "2026-10-30", "models": {
+        "test/image": {"title": "Test Image", "output": "image", "operations": ["text2image"],
+                       "listed": True, "documented": True},
+        "test/video": {"title": "Test Video", "output": "video", "operations": ["image2video"],
+                       "listed": True, "documented": False},
+        "docs/only": {"title": None, "output": None, "operations": [], "listed": False, "documented": True},
+    }}))
+    prices_path = tmp_path / "prices.json"
+    prices_path.write_text(json.dumps({
+        "test/image": {"usd": "0.500"},
+        "test/video": {"usd": "0.100"},
+    }))
+    monkeypatch.setattr(hf, "CATALOG_FILE", catalog_path)
+    monkeypatch.setattr(hf, "PRICES_FILE", prices_path)
+
+
+def test_main_prints_one_json_line(catalog_files, no_env_file, capsys):
     # capsys fängt alles ab, was auf stdout/stderr ausgegeben wird.
     assert hf.main(["models"]) == 0
     lines = capsys.readouterr().out.splitlines()
     assert len(lines) == 1
-    assert json.loads(lines[0])["models"][0]["id"] == "test/image"
+    assert [row["id"] for row in json.loads(lines[0])["models"]] == ["test/image", "test/video"]
+
+
+def test_models_sorted_by_price_with_filter(catalog_files, no_env_file, capsys):
+    hf.main(["models", "--sort", "price"])
+    rows = json.loads(capsys.readouterr().out)["models"]
+    assert [row["usd"] for row in rows] == ["0.100", "0.500"]
+    assert rows[0]["documented"] is False
+
+    hf.main(["models", "--output", "image"])
+    assert json.loads(capsys.readouterr().out)["count"] == 1
+
+
+def test_models_all_includes_docs_only(catalog_files, no_env_file, capsys):
+    hf.main(["models", "--all"])
+    assert json.loads(capsys.readouterr().out)["count"] == 3
+
+
+def test_models_without_catalog_gives_hint(no_env_file, tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(hf, "CATALOG_FILE", tmp_path / "missing.json")
+    assert hf.main(["models"]) == 1
+    assert "catalog update" in json.loads(capsys.readouterr().out)["error"]
+
+
+def test_estimate_with_learning_adds_missing_fields(sleeps):
+    session = FakeSession([
+        FakeResponse(400, {"detail": ": 'video_urls' is a required property"}),
+        FakeResponse(200, {"usd": "1.250"}),
+    ])
+    entry = hf.estimate_with_learning(session, "m", {"params": {}}, {"prompt": "test"})
+    assert entry["usd"] == "1.250"
+    assert entry["payload"] == {"prompt": "test", "video_urls": ["https://example.com/input.mp4"]}
+    assert session.calls[1]["json"]["video_urls"] == ["https://example.com/input.mp4"]
+
+
+def test_estimate_with_learning_records_other_errors(sleeps):
+    session = FakeSession([FakeResponse(404, {"detail": "Not found"})])
+    entry = hf.estimate_with_learning(session, "m", {}, {"prompt": "test"})
+    assert entry["usd"] is None
+    assert entry["error"] == "HTTP 404: Not found"
+
+
+def test_estimate_with_learning_keeps_pricing_description(sleeps):
+    session = FakeSession([FakeResponse(200, {"type": "description", "pricing_description": "$0.2/s"})])
+    entry = hf.estimate_with_learning(session, "m", {}, {"prompt": "test"})
+    assert entry["usd"] is None
+    assert entry["pricing"] == "$0.2/s"
 
 
 def test_main_error_has_exit_code_and_no_traceback(no_env_file, monkeypatch, capsys):

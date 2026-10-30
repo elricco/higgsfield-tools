@@ -1,0 +1,747 @@
+{
+  "alibaba/happy-horse/image-to-video": {
+    "checked": "2026-10-30",
+    "usd": "0.595",
+    "payload": {
+      "image_url": "https://example.com/input.jpg"
+    }
+  },
+  "alibaba/happy-horse/reference-to-video": {
+    "checked": "2026-10-30",
+    "usd": "0.595",
+    "payload": {
+      "image_urls": [
+        "https://example.com/input.jpg"
+      ],
+      "prompt": "test"
+    }
+  },
+  "alibaba/happy-horse/text-to-video": {
+    "checked": "2026-10-30",
+    "usd": "0.595",
+    "payload": {
+      "prompt": "test"
+    }
+  },
+  "alibaba/happy-horse/v1.1/image-to-video": {
+    "checked": "2026-10-30",
+    "usd": "0.765",
+    "payload": {
+      "image_url": "https://example.com/input.jpg"
+    }
+  },
+  "alibaba/happy-horse/v1.1/reference-to-video": {
+    "checked": "2026-10-30",
+    "usd": "0.765",
+    "payload": {
+      "image_urls": [
+        "https://example.com/input.jpg"
+      ],
+      "prompt": "test"
+    }
+  },
+  "alibaba/happy-horse/v1.1/text-to-video": {
+    "checked": "2026-10-30",
+    "usd": "0.765",
+    "payload": {
+      "prompt": "test"
+    }
+  },
+  "alibaba/qwen-image-3/edit": {
+    "checked": "2026-10-30",
+    "usd": "0.040",
+    "payload": {
+      "prompt": "test",
+      "image_urls": [
+        "https://example.com/input.jpg"
+      ]
+    }
+  },
+  "alibaba/qwen-image-3/text-to-image": {
+    "checked": "2026-10-30",
+    "usd": "0.040",
+    "payload": {
+      "prompt": "test"
+    }
+  },
+  "alibaba/wan-3.0/image-to-video": {
+    "checked": "2026-10-30",
+    "usd": null,
+    "payload": {
+      "prompt": "test",
+      "image_url": "https://example.com/input.jpg"
+    },
+    "pricing": "Priced per generated second by resolution: 480p $0.05, 720p $0.10, or 1080p $0.20. Rates shown are before any applicable customer discount."
+  },
+  "alibaba/wan-3.0-prime/image-to-video": {
+    "checked": "2026-10-30",
+    "usd": "0.560",
+    "payload": {
+      "prompt": "test",
+      "image_url": "https://example.com/input.jpg"
+    }
+  },
+  "alibaba/wan-3.0-prime/reference-to-video": {
+    "checked": "2026-10-30",
+    "usd": null,
+    "payload": {
+      "prompt": "test"
+    },
+    "pricing": "Priced per total video second: 480p $0.068/s, 720p $0.14/s, 1080p $0.28/s. Total billable duration = output video duration + the sum of all input reference video durations. Without input videos, only output duration is billed. Rates shown are before any applicable customer discount."
+  },
+  "alibaba/wan-3.0-prime/text-to-video": {
+    "checked": "2026-10-30",
+    "usd": "0.560",
+    "payload": {
+      "prompt": "test"
+    }
+  },
+  "alibaba/wan-3.0/reference-to-video": {
+    "checked": "2026-10-30",
+    "usd": null,
+    "payload": {
+      "prompt": "test"
+    },
+    "pricing": "Priced per total video second: 480p $0.05/s, 720p $0.10/s, 1080p $0.20/s. Total billable duration = output video duration + the sum of all input reference video durations. Without input videos, only output duration is billed. Rates shown are before any applicable customer discount."
+  },
+  "alibaba/wan-3.0/text-to-video": {
+    "checked": "2026-10-30",
+    "usd": null,
+    "payload": {
+      "prompt": "test"
+    },
+    "pricing": "Priced per generated second by resolution: 480p $0.05, 720p $0.10, or 1080p $0.20. Rates shown are before any applicable customer discount."
+  },
+  "bytedance/seedance-2.0/image-to-video": {
+    "checked": "2026-10-30",
+    "usd": null,
+    "payload": {
+      "image_url": "https://example.com/input.jpg"
+    },
+    "pricing": "Token-metered pricing. Billable video tokens = ceil(generated video seconds × output width × output height × 24 fps / 1024). Image and audio references do not count as video input. Per 1,000 video tokens: 480p/720p/1080p $0.014, 4K $0.008. Rates shown are before any applicable customer discount."
+  },
+  "bytedance/seedance-2.0/reference-to-video": {
+    "checked": "2026-10-30",
+    "usd": null,
+    "payload": {
+      "video_urls": [
+        "https://example.com/input.mp4"
+      ]
+    },
+    "pricing": "Token-metered pricing. Billable video tokens = ceil((input video seconds + generated video seconds) × output width × output height × 24 fps / 1024). Image and audio references do not count as video input. Per 1,000 video tokens: without video input — 480p/720p/1080p $0.014, 4K $0.008; with video input — 480p/720p/1080p $0.0084, 4K $0.0048 (0.6× the standard rate). With video references, both input and generated video durations are billable. Rates shown are before any applicable customer discount."
+  },
+  "bytedance/seedance-2.0/text-to-video": {
+    "checked": "2026-10-30",
+    "usd": null,
+    "payload": {
+      "prompt": "test"
+    },
+    "pricing": "Token-metered pricing. Billable video tokens = ceil(generated video seconds × output width × output height × 24 fps / 1024). Image and audio references do not count as video input. Per 1,000 video tokens: 480p/720p/1080p $0.014, 4K $0.008. Rates shown are before any applicable customer discount."
+  },
+  "bytedance/seedance-2.5/image-to-video": {
+    "checked": "2026-10-30",
+    "usd": null,
+    "payload": {
+      "image_url": "https://example.com/input.jpg"
+    },
+    "pricing": "For 16:9 video without video input, your request costs roughly $0.2056 per second of generated video at 480p, $0.4622 at 720p, and $1.1372 at 1080p. Each 1,000 video tokens costs $0.0214 at 480p or 720p and $0.0234 at 1080p. Billable video tokens = ceil(output height × output width × (input video duration + generated video duration) × 24 / 1024). Image and audio references do not count as video input. Actual pricing depends on output dimensions and billable duration. Rates shown are before any applicable customer discount."
+  },
+  "bytedance/seedance-2.5/reference-to-video": {
+    "checked": "2026-10-30",
+    "usd": null,
+    "payload": {
+      "audio_urls": [
+        "https://example.com/input.wav"
+      ]
+    },
+    "pricing": "For 16:9 video without video input, your request costs roughly $0.2056 per second of generated video at 480p, $0.4622 at 720p, and $1.1372 at 1080p. Each 1,000 video tokens costs $0.0214 at 480p or 720p and $0.0234 at 1080p. If video inputs are provided, the token rate is multiplied by 0.6: $0.01284 per 1,000 tokens at 480p or 720p and $0.01404 at 1080p. Both input and generated video durations are billable. Billable video tokens = ceil(output height × output width × (input video duration + generated video duration) × 24 / 1024). Image and audio references do not count as video input. Actual pricing depends on output dimensions and billable duration. Rates shown are before any applicable customer discount."
+  },
+  "bytedance/seedance-2.5/text-to-video": {
+    "checked": "2026-10-30",
+    "usd": null,
+    "payload": {
+      "prompt": "test"
+    },
+    "pricing": "For 16:9 video without video input, your request costs roughly $0.2056 per second of generated video at 480p, $0.4622 at 720p, and $1.1372 at 1080p. Each 1,000 video tokens costs $0.0214 at 480p or 720p and $0.0234 at 1080p. Billable video tokens = ceil(output height × output width × (input video duration + generated video duration) × 24 / 1024). Image and audio references do not count as video input. Actual pricing depends on output dimensions and billable duration. Rates shown are before any applicable customer discount."
+  },
+  "bytedance/seedance-2.5/video-edit": {
+    "checked": "2026-10-30",
+    "usd": null,
+    "payload": {
+      "prompt": "test",
+      "video_url": "https://example.com/input.mp4"
+    },
+    "pricing": "Video input is required. Each 1,000 video tokens costs $0.01284 at 480p or 720p and $0.01404 at 1080p (0.6× the no-video-input rate). For 16:9 output, this is roughly $0.1234 at 480p, $0.2773 at 720p, and $0.6823 at 1080p per second of combined input and generated video duration. Both input and generated video durations are billable. Billable video tokens = ceil(output height × output width × (input video duration + generated video duration) × 24 / 1024). Image and audio references do not count as video input. Actual pricing depends on output dimensions and billable duration. Rates shown are before any applicable customer discount."
+  },
+  "bytedance/seedance-2.5/video-extend": {
+    "checked": "2026-10-30",
+    "usd": null,
+    "payload": {
+      "prompt": "test",
+      "video_url": "https://example.com/input.mp4"
+    },
+    "pricing": "Video input is required. Each 1,000 video tokens costs $0.01284 at 480p or 720p and $0.01404 at 1080p (0.6× the no-video-input rate). For 16:9 output, this is roughly $0.1234 at 480p, $0.2773 at 720p, and $0.6823 at 1080p per second of combined input and generated video duration. Both input and generated video durations are billable. Billable video tokens = ceil(output height × output width × (input video duration + generated video duration) × 24 / 1024). Image and audio references do not count as video input. Actual pricing depends on output dimensions and billable duration. Rates shown are before any applicable customer discount."
+  },
+  "higgsfield/ads-studio/v1.0": {
+    "checked": "2026-10-30",
+    "usd": null,
+    "payload": {
+      "prompt": "test"
+    },
+    "pricing": "Per 1M tokens: text input $5, cached text input $1.25, text output $10; image input $8, cached image input $2, image output $30. Quality defaults to high. Final cost uses actual token usage and standard credit rounding. The initial charge is an estimate reconciled on completion."
+  },
+  "higgsfield/ai-influencer": {
+    "checked": "2026-10-30",
+    "usd": "0.050",
+    "payload": {
+      "prompt": "test",
+      "image_url": "https://example.com/input.jpg"
+    }
+  },
+  "higgsfield-ai/soul/standard": {
+    "checked": "2026-10-30",
+    "usd": "0.094",
+    "payload": {
+      "prompt": "test",
+      "aspect_ratio": "4:3"
+    }
+  },
+  "higgsfield-ai/soul/v2/image-to-image": {
+    "checked": "2026-10-30",
+    "usd": "0.004",
+    "payload": {
+      "prompt": "test",
+      "image_url": "https://example.com/input.jpg"
+    }
+  },
+  "higgsfield-ai/soul/v2/standard": {
+    "checked": "2026-10-30",
+    "usd": "0.004",
+    "payload": {
+      "prompt": "test",
+      "aspect_ratio": "4:3"
+    }
+  },
+  "higgsfield/cinema-studio/4.0": {
+    "checked": "2026-10-30",
+    "usd": null,
+    "payload": {
+      "prompt": "test"
+    },
+    "pricing": "Token-metered pricing. Billable video tokens = ceil((input video seconds + generated video seconds) × output width × output height × 24 fps / 1024). Image and audio references do not count as video input. At 480p or 720p, each 1,000 video tokens cost $0.0214 without video input or $0.01284 with video input (0.6× the standard rate). With video references, both input and generated video durations are billable. Rates shown are before any applicable customer discount."
+  },
+  "higgsfield/genjutsu-light/motion-transfer/v1.0": {
+    "checked": "2026-10-30",
+    "usd": null,
+    "payload": {
+      "prompt": "test",
+      "video_url": "https://example.com/input.mp4",
+      "image_urls": [
+        "https://example.com/input.jpg"
+      ]
+    },
+    "pricing": "Priced per total second by resolution: 480p $0.05, 720p $0.10, or 1080p $0.20. Rates shown are before any applicable customer discount. Billable seconds = output duration + the sum of input reference video durations. Input video durations are measured during preprocessing; without video references, only output duration is billed. Genjutsu Light trims the source to 15 seconds; output duration is rounded up to whole seconds before billing."
+  },
+  "higgsfield/genjutsu-light/object-swap/v1.0": {
+    "checked": "2026-10-30",
+    "usd": null,
+    "payload": {
+      "prompt": "test",
+      "video_url": "https://example.com/input.mp4",
+      "image_urls": [
+        "https://example.com/input.jpg"
+      ]
+    },
+    "pricing": "Priced per total second by resolution: 480p $0.05, 720p $0.10, or 1080p $0.20. Rates shown are before any applicable customer discount. Billable seconds = output duration + the sum of input reference video durations. Input video durations are measured during preprocessing; without video references, only output duration is billed. Genjutsu Light trims the source to 15 seconds; output duration is rounded up to whole seconds before billing."
+  },
+  "higgsfield/genjutsu/motion-transfer/v1.0": {
+    "checked": "2026-10-30",
+    "usd": null,
+    "payload": {
+      "video_url": "https://example.com/input.mp4",
+      "image_urls": [
+        "https://example.com/input.jpg"
+      ]
+    },
+    "pricing": "Per-second pricing. Each second of input video costs $0.318 at 480p, $0.681 at 720p, $1.632 at 1080p. Input duration is rounded up to the nearest whole second. Rates shown are before any applicable customer discount."
+  },
+  "higgsfield/genjutsu/object-swap/v1.0": {
+    "checked": "2026-10-30",
+    "usd": null,
+    "payload": {
+      "video_url": "https://example.com/input.mp4",
+      "image_urls": [
+        "https://example.com/input.jpg"
+      ]
+    },
+    "pricing": "Per-second pricing. Each second of input video costs $0.318 at 480p, $0.681 at 720p, $1.632 at 1080p. Input duration is rounded up to the nearest whole second. Rates shown are before any applicable customer discount."
+  },
+  "higgsfield/genjutsu/restyle/v1.0": {
+    "checked": "2026-10-30",
+    "usd": null,
+    "payload": {
+      "video_url": "https://example.com/input.mp4",
+      "preset_id": "test"
+    },
+    "pricing": "Roughly costs $0.318 per second at 480p, $0.681 per second at 720p, or $1.632 per second at 1080p."
+  },
+  "ideogram/v4.0": {
+    "checked": "2026-10-30",
+    "usd": "0.060",
+    "payload": {
+      "prompt": "test"
+    }
+  },
+  "kling-video/motion-control/pro": {
+    "checked": "2026-10-30",
+    "usd": null,
+    "payload": {
+      "image_url": "https://example.com/input.jpg",
+      "video_url": "https://example.com/input.mp4"
+    },
+    "pricing": "Price estimation is unavailable for this model."
+  },
+  "kling-video/motion-control/std": {
+    "checked": "2026-10-30",
+    "usd": null,
+    "payload": {
+      "image_url": "https://example.com/input.jpg",
+      "video_url": "https://example.com/input.mp4"
+    },
+    "pricing": "Price estimation is unavailable for this model."
+  },
+  "kling-video/o3/first-last-frame": {
+    "checked": "2026-10-30",
+    "usd": "0.476",
+    "payload": {
+      "prompt": "test",
+      "first_frame_url": "https://example.com/input.jpg"
+    }
+  },
+  "kling-video/o3/image-reference": {
+    "checked": "2026-10-30",
+    "usd": "0.357",
+    "payload": {
+      "prompt": "test"
+    }
+  },
+  "kling-video/o3/video-edit": {
+    "checked": "2026-10-30",
+    "usd": null,
+    "payload": {
+      "prompt": "test",
+      "video_urls": [
+        "https://example.com/input.mp4"
+      ]
+    },
+    "pricing": "Price estimation is unavailable for this model."
+  },
+  "kling-video/o3/video-reference": {
+    "checked": "2026-10-30",
+    "usd": "0.714",
+    "payload": {
+      "prompt": "test",
+      "video_urls": [
+        "https://example.com/input.mp4"
+      ]
+    }
+  },
+  "kling-video/omni/first-last-frame": {
+    "checked": "2026-10-30",
+    "usd": "0.476",
+    "payload": {
+      "prompt": "test",
+      "first_frame_url": "https://example.com/input.jpg"
+    }
+  },
+  "kling-video/omni/image-reference": {
+    "checked": "2026-10-30",
+    "usd": "0.476",
+    "payload": {
+      "prompt": "test"
+    }
+  },
+  "kling-video/omni/video-edit": {
+    "checked": "2026-10-30",
+    "usd": null,
+    "payload": {
+      "prompt": "test",
+      "video_urls": [
+        "https://example.com/input.mp4"
+      ]
+    },
+    "pricing": "Price estimation is unavailable for this model."
+  },
+  "kling-video/omni/video-reference": {
+    "checked": "2026-10-30",
+    "usd": "0.714",
+    "payload": {
+      "prompt": "test",
+      "video_urls": [
+        "https://example.com/input.mp4"
+      ]
+    }
+  },
+  "kling-video/v2.5-turbo/pro/image-to-video": {
+    "checked": "2026-10-30",
+    "usd": "0.298",
+    "payload": {
+      "prompt": "test",
+      "image_url": "https://example.com/input.jpg"
+    }
+  },
+  "kling-video/v2.5-turbo/pro/text-to-video": {
+    "checked": "2026-10-30",
+    "usd": "0.298",
+    "payload": {
+      "prompt": "test"
+    }
+  },
+  "kling-video/v2.5-turbo/standard/image-to-video": {
+    "checked": "2026-10-30",
+    "usd": "0.179",
+    "payload": {
+      "prompt": "test",
+      "image_url": "https://example.com/input.jpg",
+      "duration": 5
+    }
+  },
+  "kling-video/v2.6/pro/image-to-video": {
+    "checked": "2026-10-30",
+    "usd": "0.595",
+    "payload": {
+      "prompt": "test",
+      "image_url": "https://example.com/input.jpg"
+    }
+  },
+  "kling-video/v2.6/pro/text-to-video": {
+    "checked": "2026-10-30",
+    "usd": "0.595",
+    "payload": {
+      "prompt": "test"
+    }
+  },
+  "kling-video/v3.0/4k/image-to-video": {
+    "checked": "2026-10-30",
+    "usd": "1.785",
+    "payload": {
+      "image_url": "https://example.com/input.jpg"
+    }
+  },
+  "kling-video/v3.0/4k/text-to-video": {
+    "checked": "2026-10-30",
+    "usd": "1.785",
+    "payload": {}
+  },
+  "kling-video/v3.0/pro/image-to-video": {
+    "checked": "2026-10-30",
+    "usd": "0.714",
+    "payload": {
+      "image_url": "https://example.com/input.jpg"
+    }
+  },
+  "kling-video/v3.0/pro/text-to-video": {
+    "checked": "2026-10-30",
+    "usd": "0.714",
+    "payload": {}
+  },
+  "kling-video/v3.0/std/image-to-video": {
+    "checked": "2026-10-30",
+    "usd": "0.536",
+    "payload": {
+      "image_url": "https://example.com/input.jpg"
+    }
+  },
+  "kling-video/v3.0/std/text-to-video": {
+    "checked": "2026-10-30",
+    "usd": "0.536",
+    "payload": {}
+  },
+  "kling-video/v3.0-turbo/image-to-video": {
+    "checked": "2026-10-30",
+    "usd": "0.476",
+    "payload": {
+      "prompt": "test",
+      "image_url": "https://example.com/input.jpg"
+    }
+  },
+  "kling-video/v3.0-turbo/text-to-video": {
+    "checked": "2026-10-30",
+    "usd": "0.476",
+    "payload": {
+      "prompt": "test"
+    }
+  },
+  "kling-video/v3/motion-control/pro": {
+    "checked": "2026-10-30",
+    "usd": null,
+    "payload": {
+      "image_url": "https://example.com/input.jpg",
+      "video_url": "https://example.com/input.mp4"
+    },
+    "pricing": "Price estimation is unavailable for this model."
+  },
+  "kling-video/v3/motion-control/std": {
+    "checked": "2026-10-30",
+    "usd": null,
+    "payload": {
+      "image_url": "https://example.com/input.jpg",
+      "video_url": "https://example.com/input.mp4"
+    },
+    "pricing": "Price estimation is unavailable for this model."
+  },
+  "kling-video/v4.0/image-to-video": {
+    "checked": "2026-10-30",
+    "usd": "1.998",
+    "payload": {
+      "prompt": "test",
+      "image_url": "https://example.com/input.jpg"
+    }
+  },
+  "kling-video/v4.0/reference-to-video": {
+    "checked": "2026-10-30",
+    "usd": null,
+    "payload": {
+      "prompt": "test",
+      "image_url": "https://example.com/input.jpg"
+    },
+    "pricing": "Without input video: 720p $0.157/s, 1080p $0.235/s, charged on output duration. With input video: 720p $0.094/s, 1080p $0.141/s, charged on output duration + max(total input video duration, output duration). Input duration includes video elements and explicit videos after the 30-second trim."
+  },
+  "kling-video/v4.0/text-to-video": {
+    "checked": "2026-10-30",
+    "usd": "1.998",
+    "payload": {
+      "prompt": "test",
+      "image_url": "https://example.com/input.jpg"
+    }
+  },
+  "kling-video/v4.0/video-edit": {
+    "checked": "2026-10-30",
+    "usd": null,
+    "payload": {
+      "prompt": "test",
+      "image_url": "https://example.com/input.jpg",
+      "video_url": "https://example.com/input.mp4"
+    },
+    "pricing": "Without input video: 720p $0.157/s, 1080p $0.235/s, charged on output duration. With input video: 720p $0.094/s, 1080p $0.141/s, charged on output duration + max(total input video duration, output duration). Input duration includes video elements and explicit videos after the 30-second trim."
+  },
+  "lightricks/ltx-2.5/image-to-video/fast": {
+    "checked": "2026-10-30",
+    "usd": "0.540",
+    "payload": {
+      "prompt": "test",
+      "duration": 6,
+      "image_url": "https://example.com/input.jpg"
+    }
+  },
+  "lightricks/ltx-2.5/image-to-video/pro": {
+    "checked": "2026-10-30",
+    "usd": "0.720",
+    "payload": {
+      "prompt": "test",
+      "duration": 6,
+      "image_url": "https://example.com/input.jpg"
+    }
+  },
+  "lightricks/ltx-2.5/text-to-video/fast": {
+    "checked": "2026-10-30",
+    "usd": "0.540",
+    "payload": {
+      "prompt": "test",
+      "duration": 6
+    }
+  },
+  "lightricks/ltx-2.5/text-to-video/pro": {
+    "checked": "2026-10-30",
+    "usd": "0.720",
+    "payload": {
+      "prompt": "test",
+      "duration": 6
+    }
+  },
+  "marketing-studio/image": {
+    "checked": "2026-10-30",
+    "usd": "0.373",
+    "payload": {
+      "prompt": "test"
+    }
+  },
+  "marketing-studio/image/flare": {
+    "checked": "2026-10-30",
+    "usd": null,
+    "payload": {
+      "prompt": "test"
+    },
+    "pricing": "Per 1M tokens: text input $5, cached text input $1.25, text output $10; image input $8, cached image input $2, image output $30. Quality defaults to high. Final cost uses actual token usage and standard credit rounding. The initial charge is an estimate reconciled on completion."
+  },
+  "marketing-studio/image/sunburst": {
+    "checked": "2026-10-30",
+    "usd": null,
+    "payload": {
+      "prompt": "test"
+    },
+    "pricing": "Per 1M tokens: text input $5, cached text input $1.25, text output $10; image input $8, cached image input $2, image output $30. Quality defaults to high. Final cost uses actual token usage and standard credit rounding. The initial charge is an estimate reconciled on completion."
+  },
+  "minimax/h3/image-to-video": {
+    "checked": "2026-10-30",
+    "usd": "0.553",
+    "payload": {
+      "prompt": "test",
+      "image_url": "https://example.com/input.jpg"
+    }
+  },
+  "minimax/h3/reference-to-video": {
+    "checked": "2026-10-30",
+    "usd": null,
+    "payload": {
+      "prompt": "test",
+      "video_urls": [
+        "https://example.com/input.mp4"
+      ]
+    },
+    "pricing": "2K output costs $0.13 per generated second. The first five reference images are included; each additional reference image costs $0.08. Rates shown are before any applicable customer discount."
+  },
+  "minimax/h3/text-to-video": {
+    "checked": "2026-10-30",
+    "usd": "0.553",
+    "payload": {
+      "prompt": "test"
+    }
+  },
+  "minimax/hailuo-2.3/standard/image-to-video": {
+    "checked": "2026-10-30",
+    "usd": "0.238",
+    "payload": {
+      "prompt": "test",
+      "image_url": "https://example.com/input.jpg",
+      "duration": 6
+    }
+  },
+  "minimax/hailuo-2.3/standard/text-to-video": {
+    "checked": "2026-10-30",
+    "usd": "0.238",
+    "payload": {
+      "prompt": "test"
+    }
+  },
+  "pixverse/v6/image-to-video": {
+    "checked": "2026-10-30",
+    "usd": "0.255",
+    "payload": {
+      "prompt": "test",
+      "image_url": "https://example.com/input.jpg"
+    }
+  },
+  "pixverse/v6/text-to-video": {
+    "checked": "2026-10-30",
+    "usd": "0.255",
+    "payload": {
+      "prompt": "test"
+    }
+  },
+  "recraft/v4.1/pro/text-to-image": {
+    "checked": "2026-10-30",
+    "usd": "0.210",
+    "payload": {
+      "prompt": "test"
+    }
+  },
+  "recraft/v4.1/text-to-image": {
+    "checked": "2026-10-30",
+    "usd": "0.035",
+    "payload": {
+      "prompt": "test"
+    }
+  },
+  "recraft/v4.1/utility/pro/text-to-image": {
+    "checked": "2026-10-30",
+    "usd": "0.210",
+    "payload": {
+      "prompt": "test"
+    }
+  },
+  "recraft/v4.1/utility/text-to-image": {
+    "checked": "2026-10-30",
+    "usd": "0.035",
+    "payload": {
+      "prompt": "test"
+    }
+  },
+  "soul-id": {
+    "checked": "2026-10-30",
+    "usd": "2.500",
+    "payload": {
+      "prompt": "test"
+    }
+  },
+  "wan/v2.6/image-to-video": {
+    "checked": "2026-10-30",
+    "usd": "0.425",
+    "payload": {
+      "prompt": "test",
+      "image_url": "https://example.com/input.jpg"
+    }
+  },
+  "wan/v2.6/reference-to-video": {
+    "checked": "2026-10-30",
+    "usd": "0.425",
+    "payload": {
+      "prompt": "test",
+      "video_urls": [
+        "https://example.com/input.mp4"
+      ]
+    }
+  },
+  "wan/v2.6/text-to-video": {
+    "checked": "2026-10-30",
+    "usd": "0.425",
+    "payload": {
+      "prompt": "test"
+    }
+  },
+  "wan/v2.7/image-to-video": {
+    "checked": "2026-10-30",
+    "usd": "0.425",
+    "payload": {
+      "image_url": "https://example.com/input.jpg"
+    }
+  },
+  "wan/v2.7/reference-to-video": {
+    "checked": "2026-10-30",
+    "usd": "0.425",
+    "payload": {
+      "prompt": "test",
+      "video_urls": [
+        "https://example.com/input.mp4"
+      ]
+    }
+  },
+  "wan/v2.7/text-to-video": {
+    "checked": "2026-10-30",
+    "usd": "0.425",
+    "payload": {
+      "prompt": "test"
+    }
+  },
+  "xai/grok-imagine-image-2.0": {
+    "checked": "2026-10-30",
+    "usd": "0.060",
+    "payload": {
+      "prompt": "test"
+    }
+  },
+  "xai/grok-imagine-video/v1.5/reference-to-video": {
+    "checked": "2026-10-30",
+    "usd": "0.400",
+    "payload": {
+      "prompt": "test"
+    }
+  },
+  "z-image/turbo": {
+    "checked": "2026-10-30",
+    "usd": "0.015",
+    "payload": {
+      "prompt": "test"
+    }
+  }
+}
