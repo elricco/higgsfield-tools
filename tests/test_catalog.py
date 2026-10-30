@@ -1,10 +1,10 @@
-"""Tests für catalog.py – reine Funktionen, daher ganz ohne Mocks."""
+"""Tests for catalog.py – pure functions, so no mocks at all."""
 
 import pytest
 
 import catalog
 
-# Ein Ausschnitt im Format von llms-full.txt: eine normale Seite, zwei Modellseiten.
+# An excerpt in the format of llms-full.txt: one normal page, two model pages.
 SAMPLE_DOCS = """# Authentication
 Source: https://docs.higgsfield.ai/docs/authentication
 
@@ -59,7 +59,7 @@ def test_parse_docs_reads_schema_and_notes():
     assert kling["required"] == ["prompt", "image_url"]
     assert kling["params"]["duration"] == {"type": "integer", "default": 5, "enum": [5, 10]}
     assert kling["params"]["seed"] == {"type": ["integer", "null"]}
-    # "\_" aus dem Markdown wird zu "_".
+    # "\_" from the Markdown becomes "_".
     assert kling["notes"][1] == "This endpoint does not expose a sound or aspect_ratio field."
 
 

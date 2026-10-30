@@ -5,17 +5,17 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "higgsfield-tools"
 version = "0.1.0"
-description = "Schlankes CLI für die Higgsfield-API (Bilder und Videos)"
+description = "Lean CLI for the Higgsfield API (images and videos)"
 requires-python = ">=3.10"
 dependencies = ["requests>=2.32"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
 
-# Erzeugt den Befehl "hf", der hf.main() aufruft.
+# Creates the command "hf", which calls hf.main().
 [project.scripts]
 hf = "hf:main"
 
 [tool.setuptools]
-# Keine Paketordner, sondern zwei einzelne Module im Projektordner.
+# No package folders, just two single modules in the project folder.
 py-modules = ["hf", "catalog"]

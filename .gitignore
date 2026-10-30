@@ -1,9 +1,9 @@
-# Geheimnisse
+# Secrets
 .env
 .env.*
 !.env.example
 
-# Erzeugte Dateien
+# Generated files
 outputs/
 
 # Python
@@ -12,12 +12,12 @@ __pycache__/
 *.pyc
 .pytest_cache/
 
-# Lokale Zuordnung request_id -> Modell
+# Local mapping request_id -> model
 .hf-history.json
 
-# Trainierte Charaktere (kontospezifische IDs)
+# Trained characters (account-specific IDs)
 characters.json
 
-# Nebenprodukt von pip install -e .
+# By-product of pip install -e .
 *.egg-info/
 build/

@@ -1,79 +1,79 @@
-# Higgsfield-Skill: Referenz
+# Higgsfield skill: reference
 
-Nur bei Bedarf lesen. Kurzfassung steht in [SKILL.md](SKILL.md).
+Only read when needed. The short version is in [SKILL.md](SKILL.md).
 
-## Alle Befehle
+## All commands
 
-| Befehl | Ausgabe |
+| Command | Output |
 |---|---|
 | `models [--output image\|video] [--op OP] [--search TEXT] [--sort name\|price] [--limit N] [--all]` | `{"count", "models": [{"id", "title", "ops", "usd", ...}]}` |
-| `info <model_id>` | Titel, `required`, `params`, Doku-`notes`, `docs_url`, `price`, `own_notes` |
-| `estimate <model_id> --prompt ... [--image-url] [--param k=v]` | `{"model", "usd"}` oder zusätzlich `"pricing"` (Text bei Token-Abrechnung) |
+| `info <model_id>` | title, `required`, `params`, docs `notes`, `docs_url`, `price`, `own_notes` |
+| `estimate <model_id> --prompt ... [--image-url] [--param k=v]` | `{"model", "usd"}` or additionally `"pricing"` (text for token-based billing) |
 | `submit <model_id> --prompt ... [...]` | `{"request_id", "status"}` |
 | `status <request_id> [--urls]` | `{"request_id", "status", ["error"], ["urls"]}` |
-| `cancel <request_id>` | `{"request_id", "status": "canceled"}`; Fehler, wenn der Job schon läuft |
-| `upload <datei>` | `{"file", "url"}` – öffentliche URL der hochgeladenen Datei |
-| `wait <request_id> [--timeout 600]` | Endstatus; Polling 2 s → 10 s |
+| `cancel <request_id>` | `{"request_id", "status": "canceled"}`; error if the job is already running |
+| `upload <file>` | `{"file", "url"}` – public URL of the uploaded file |
+| `wait <request_id> [--timeout 600]` | final status; polling 2 s → 10 s |
 | `download <request_id> [--out outputs]` | `{"request_id", "status", "files": [...]}` |
-| `run <model_id> --prompt ... [--timeout] [--out]` | wie `download` |
-| `catalog update [--docs-file PATH]` | baut `catalog.json` aus `GET /models` + Doku |
-| `prices [Filter wie models]` | schreibt `prices.json`, Ausgabe nur Zähler |
-| `character create <Name> <bilder...> [--model-version v2]` | Soul-ID-Training starten (2,50 $) |
-| `character status <Name>` / `character list` | Trainingsstatus / lokal bekannte Charaktere |
-| `character add <Name> <ID>` | vorhandene ID lokal eintragen (prüft sie kostenlos) |
-| `doctor` | prüft Zugangsdaten, API, Doku, Katalog-Stand |
+| `run <model_id> --prompt ... [--timeout] [--out]` | like `download` |
+| `catalog update [--docs-file PATH]` | builds `catalog.json` from `GET /models` + docs |
+| `prices [filters like models]` | writes `prices.json`, output only counters |
+| `character create <name> <images...> [--model-version v2]` | start Soul ID training ($2.50) |
+| `character status <name>` / `character list` | training status / locally known characters |
+| `character add <name> <id>` | register an existing ID locally (checks it for free) |
+| `doctor` | checks credentials, API, docs, catalog age |
 
-Generierungs-Optionen zusätzlich: `--image-urls A B ...` (Edit-Modelle), `--character <Name>` (SOUL).
+Additional generation options: `--image-urls A B ...` (edit models), `--character <name>` (SOUL).
 
-`--param` liest Werte als JSON: `duration=5` → Zahl, `enhance_prompt=true` → bool, `aspect_ratio=16:9` → Text.
-Reihenfolge im Body: Defaults aus `models.json` → `--prompt`/`--image-url` → `--param`.
+`--param` reads values as JSON: `duration=5` → number, `enhance_prompt=true` → bool, `aspect_ratio=16:9` → text.
+Order in the body: defaults from `models.json` → `--prompt`/`--image-url` → `--param`.
 
-Exit-Codes: `0` ok, `1` Fehler oder Job `failed`/`nsfw`/`canceled`, `2` Zugangsdaten fehlen.
+Exit codes: `0` ok, `1` error or job `failed`/`nsfw`/`canceled`, `2` credentials missing.
 
-## Dateien
+## Files
 
-Alle Dateien außer `outputs/` liegen im Repo `higgsfield-tools` (dort, wohin `~/.local/bin/hf` zeigt),
-unabhängig vom aktuellen Ordner.
+All files except `outputs/` live in the `higgsfield-tools` repo (where `~/.local/bin/hf` points to),
+regardless of the current directory.
 
-| Datei | Inhalt | Gepflegt |
+| File | Content | Maintained by |
 |---|---|---|
-| `characters.json` | Charakter-Name → Soul-ID (nicht in Git) | `character create/add` |
-| `catalog.json` | alle Modelle: Titel, Operationen, Parameter, Doku-Notizen | `catalog update` |
-| `prices.json` | Preis je Modell mit Datum und dem verwendeten Platzhalter-Body | `prices` |
-| `models.json` | eigene Testnotizen + Standardparameter getesteter Modelle | von Hand |
-| `./outputs/` (aktueller Ordner) | Downloads: `<datum>_<modell>_<request_id>[_n].<endung>` | automatisch |
-| `.hf-history.json` | request_id → Modell (für Dateinamen) | automatisch |
+| `characters.json` | character name → Soul ID (not in Git) | `character create/add` |
+| `catalog.json` | all models: title, operations, parameters, docs notes | `catalog update` |
+| `prices.json` | price per model with date and the placeholder body used | `prices` |
+| `models.json` | own test notes + default parameters of tested models | by hand |
+| `./outputs/` (current directory) | downloads: `<date>_<model>_<request_id>[_n].<extension>` | automatic |
+| `.hf-history.json` | request_id → model (for file names) | automatic |
 
-Preise in `prices.json` gelten für Platzhalter-Eingaben mit Default-Parametern. Für echte Jobs immer `estimate` mit den tatsächlichen Parametern.
+Prices in `prices.json` apply to placeholder inputs with default parameters. For real jobs always run `estimate` with the actual parameters.
 
-## API-Fakten (geprüft)
+## API facts (verified)
 
-- Base URL `https://api.higgsfield.ai`, Header `Authorization: Key <id>:<secret>`.
-- `GET /models` ist **undokumentiert** (liefert Modelle des Kontos, ohne Schemas). Kann sich ändern.
-- Status: `queued` → `in_progress` → `completed` | `failed` | `nsfw` | `canceled`. `failed`/`nsfw` werden nicht berechnet.
-- Ausgabe: Bilder `images: [{url}]`, Videos `video: {url}`, Audio `audio`/`audios`. Dateien 7 Tage abrufbar (`expires_at`).
-- `submit` sendet einen `Idempotency-Key`; Retries erzeugen keine Doppel-Jobs.
-- Abbruch nur solange `queued`: `POST /requests/<id>/cancel` (`hf cancel`), sonst `400`.
-- Upload: `POST /files/generate-upload-url {"content_type"}` → `PUT` an `upload_url` mit `upload_headers`, ohne Zugangsdaten → `public_url` (CloudFront). Typen: jpeg, png, webp, gif, wav, mp4.
-- Token-abgerechnete Modelle (z. B. Seedance 2.5, Kling 4.0 reference/video-edit) liefern bei `estimate` keinen Betrag, sondern eine Preisbeschreibung pro Sekunde/Auflösung.
-- In der Doku fehlen teils Pflichtfelder in `required`; die API nennt sie im 400-Fehler.
+- Base URL `https://api.higgsfield.ai`, header `Authorization: Key <id>:<secret>`.
+- `GET /models` is **undocumented** (returns the account's models, without schemas). May change.
+- Status: `queued` → `in_progress` → `completed` | `failed` | `nsfw` | `canceled`. `failed`/`nsfw` are not charged.
+- Output: images `images: [{url}]`, videos `video: {url}`, audio `audio`/`audios`. Files can be fetched for 7 days (`expires_at`).
+- `submit` sends an `Idempotency-Key`; retries do not create duplicate jobs.
+- Cancel only while `queued`: `POST /requests/<id>/cancel` (`hf cancel`), otherwise `400`.
+- Upload: `POST /files/generate-upload-url {"content_type"}` → `PUT` to `upload_url` with `upload_headers`, without credentials → `public_url` (CloudFront). Types: jpeg, png, webp, gif, wav, mp4.
+- Token-billed models (e.g. Seedance 2.5, Kling 4.0 reference/video-edit) return no amount from `estimate`, but a pricing description per second/resolution.
+- The docs sometimes miss required fields in `required`; the API names them in the 400 error.
 
-## Prompt-Muster (ausführlich)
+## Prompt patterns (detailed)
 
-Allgemeine Erfahrungswerte, nur das Kling-Beispiel ist hier getestet.
+General experience, only the Kling example is tested here.
 
-**Bild**
-- Aufbau: *Motiv, Detail* · *Ort/Umgebung* · *Licht/Tageszeit* · *Stil/Medium/Objektiv*.
-- Konkrete Begriffe statt Adjektivketten: „35mm, shallow depth of field, overcast light“.
-- Format über `aspect_ratio`, nicht im Prompt.
+**Image**
+- Structure: *subject, detail* · *place/setting* · *light/time of day* · *style/medium/lens*.
+- Concrete terms instead of adjective chains: "35mm, shallow depth of field, overcast light".
+- Format via `aspect_ratio`, not in the prompt.
 
 **Video**
-- Bild-zu-Video: Das Bild legt Inhalt und Stil fest. Der Prompt beschreibt **was sich bewegt**.
-- Kamerabegriffe: `slow push in`, `pull back`, `pan left/right`, `tilt up`, `orbit around`, `static shot`, `handheld`, `tracking shot`.
-- Eine Hauptbewegung pro Clip; bei 5 s eher langsam und ruhig.
-- `negative_prompt` (wo vorhanden) für Artefakte: „warping, flicker, extra limbs“.
+- Image-to-video: the image defines content and style. The prompt describes **what moves**.
+- Camera terms: `slow push in`, `pull back`, `pan left/right`, `tilt up`, `orbit around`, `static shot`, `handheld`, `tracking shot`.
+- One main movement per clip; for 5 s rather slow and calm.
+- `negative_prompt` (where available) against artifacts: "warping, flicker, extra limbs".
 
-**Konsistenz über mehrere Clips**
-- Gleiche Stil-Formulierung in allen Prompts wiederverwenden.
-- Clip N+1 vom letzten Frame von Clip N starten (`ffmpeg -sseof -0.1 -i clip.mp4 -frames:v 1 last.png`, dann `--image-url last.png`) oder vom selben Startbild.
-- Modelle mit `first-last-frame` oder `reference-to-video` nutzen, wenn Anfang und Ende feststehen.
+**Consistency across several clips**
+- Reuse the same style wording in all prompts.
+- Start clip N+1 from the last frame of clip N (`ffmpeg -sseof -0.1 -i clip.mp4 -frames:v 1 last.png`, then `--image-url last.png`) or from the same start image.
+- Use models with `first-last-frame` or `reference-to-video` when start and end are fixed.

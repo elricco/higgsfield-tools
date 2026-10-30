@@ -6,6 +6,8 @@ Schlankes Python-CLI, um über die [Higgsfield-API](https://docs.higgsfield.ai) 
 Jeder Befehl gibt genau eine Zeile JSON aus. Das hält den Kontext klein, wenn Claude das CLI über den
 Skill in `.claude/skills/higgsfield/` benutzt.
 
+> CLI-Meldungen, Code-Kommentare und der Claude-Skill sind auf Englisch.
+
 ## Einrichten (auch auf einem neuen Rechner)
 
 Voraussetzungen: macOS oder Linux, Python ≥ 3.10, Git. Optional `ffmpeg` (Einzelbilder aus Videos).

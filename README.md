@@ -6,8 +6,6 @@ A lean Python CLI for generating images and videos via the [Higgsfield API](http
 Every command prints exactly one line of JSON. This keeps the context small when Claude uses the CLI through
 the skill in `.claude/skills/higgsfield/`.
 
-> The CLI messages, code comments and the Claude skill are written in German.
-
 ## Setup (including on a new machine)
 
 Requirements: macOS or Linux, Python ≥ 3.10, Git. Optional: `ffmpeg` (extracting frames from videos).

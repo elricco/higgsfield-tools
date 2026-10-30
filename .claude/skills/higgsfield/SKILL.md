@@ -1,104 +1,104 @@
 ---
 name: higgsfield
-description: Bilder und Videos über die Higgsfield-API erzeugen (Text-zu-Bild, Bild-zu-Video, Text-zu-Video, Video-Edit) mit dem CLI hf. Verwenden, wenn der User ein Bild, Foto, Video, einen Clip oder eine Animation generieren will, ein Modell wie SOUL, Kling, Seedance, Wan, Hailuo, Recraft oder Z-Image erwähnt, nach Preisen oder verfügbaren Higgsfield-Modellen fragt oder Higgsfield nennt.
+description: Generate images and videos via the Higgsfield API (text-to-image, image-to-video, text-to-video, video edit) with the CLI hf. Use when the user wants to generate an image, photo, video, clip or animation, mentions a model such as SOUL, Kling, Seedance, Wan, Hailuo, Recraft or Z-Image, asks about prices or available Higgsfield models, or names Higgsfield.
 ---
 
-# Higgsfield: Bilder und Videos erzeugen
+# Higgsfield: generating images and videos
 
-Alle Befehle mit `hf ...` ausführen – funktioniert in jedem Ordner. Downloads landen in `./outputs` des
-aktuellen Ordners (anderer Ort: `--out <ordner>`).
-Jeder Befehl gibt **eine Zeile JSON** aus; Exit-Code ≠ 0 heißt Fehler (`{"error": ...}`).
-Bei Problemen mit Zugangsdaten oder Netzwerk zuerst `hf doctor`.
+Run all commands as `hf ...` – works from any directory. Downloads go to `./outputs` in the current
+directory (different location: `--out <folder>`).
+Every command prints **one line of JSON**; exit code ≠ 0 means error (`{"error": ...}`).
+For problems with credentials or the network, run `hf doctor` first.
 
-## Ablauf
+## Workflow
 
-1. **Modell finden** (aus lokalem Katalog, kostenlos):
+1. **Find a model** (from the local catalog, free):
    `hf models --op image2video --sort price --limit 5`
-   Operationen: `text2image`, `image_edit`, `image2video`, `text2video`, `video2video`. Alternativ `--output image|video`, `--search "kling 4.0"`.
-2. **Parameter prüfen:** `hf info <model_id>` → `required`, `params` (enum/default), `notes`, `price`.
-   Ist `documented: false`, sind nur die Pflichtfelder aus `price.payload` bekannt.
-3. **Kosten nennen:** `hf estimate <model_id> --prompt "..." [--image-url URL] [--param k=v ...]` (kostenlos).
-   Preis mit den *echten* Parametern abfragen – Dauer und Auflösung ändern ihn stark.
-4. **Erst nach Bestätigung des Users erzeugen:**
-   - Bild: `hf run <model_id> --prompt "..." --param aspect_ratio=16:9`
-   - Video: dasselbe mit `run_in_background` und `--timeout 900` – Videos brauchen 1–5 Minuten.
-5. **Ergebnis berichten:** nur die Pfade aus `files` und ggf. die Kosten. Keine Roh-JSONs.
+   Operations: `text2image`, `image_edit`, `image2video`, `text2video`, `video2video`. Alternatively `--output image|video`, `--search "kling 4.0"`.
+2. **Check parameters:** `hf info <model_id>` → `required`, `params` (enum/default), `notes`, `price`.
+   If `documented: false`, only the required fields from `price.payload` are known.
+3. **State the cost:** `hf estimate <model_id> --prompt "..." [--image-url URL] [--param k=v ...]` (free).
+   Ask for the price with the *real* parameters – duration and resolution change it a lot.
+4. **Generate only after the user confirms:**
+   - Image: `hf run <model_id> --prompt "..." --param aspect_ratio=16:9`
+   - Video: the same with `run_in_background` and `--timeout 900` – videos take 1–5 minutes.
+5. **Report the result:** only the paths from `files` and the cost if relevant. No raw JSON.
 
-Bei langen Jobs oder Abbruch: `submit` → `wait <id>` → `download <id>`; dieselbe `request_id` kostet nicht doppelt.
+For long jobs or after an interruption: `submit` → `wait <id>` → `download <id>`; the same `request_id` is not charged twice.
 
-## Regeln
+## Rules
 
-- **Vor jeder kostenpflichtigen Generierung** Modell + geschätzten Preis nennen und Bestätigung abwarten. Bei Serien die Gesamtsumme nennen.
-- `.env` nie lesen oder ausgeben; Zugangsdaten lädt `hf` selbst.
-- `--verbose` / `-v` nur zur Fehlersuche, nicht für normale Ausgaben.
-- Vor Bild-zu-Video sicherstellen, dass `--image-url` nicht leer ist (öffentliche HTTPS-URL oder existierende lokale Datei).
-- Fehlt ein Modell im Katalog oder ist er älter als ~2 Wochen: `hf catalog update` und danach `hf prices` (beides kostenlos).
+- **Before every paid generation** state the model + estimated price and wait for confirmation. For series, state the total.
+- Never read or print `.env`; `hf` loads the credentials itself.
+- `--verbose` / `-v` only for debugging, not for normal output.
+- Before image-to-video make sure `--image-url` is not empty (public HTTPS URL or an existing local file).
+- If a model is missing from the catalog or the catalog is older than ~2 weeks: `hf catalog update`, then `hf prices` (both free).
 
-## Getestete Modelle (Stand 2026-10-30)
+## Tested models (as of 2026-10-30)
 
-| Modell | Zweck | Preis | Ergebnis |
+| Model | Purpose | Price | Result |
 |---|---|---|---|
-| `higgsfield-ai/soul/v2/standard` | Text→Bild, Standard-Wahl | 0,004 $ (720p) | PNG 1696×960 bei 16:9, ~18 s |
-| `kling-video/v2.5-turbo/standard/image-to-video` | Bild→Video, günstig | 0,179 $ (5 s), 0,357 $ (10 s) | MP4 1276×720, 24 fps, ~60 s, ohne Ton |
-| `kling-video/v4.0/image-to-video` | Bild→Video, neuer, **mit Ton** | ~0,134 $/s (720p), ~0,20 $/s (1080p) | MP4 1296×732, 24 fps + AAC-Ton, ~3,5 min für 3 s |
+| `higgsfield-ai/soul/v2/standard` | text→image, default choice | $0.004 (720p) | PNG 1696×960 at 16:9, ~18 s |
+| `kling-video/v2.5-turbo/standard/image-to-video` | image→video, cheap | $0.179 (5 s), $0.357 (10 s) | MP4 1276×720, 24 fps, ~60 s, no sound |
+| `kling-video/v4.0/image-to-video` | image→video, newer, **with sound** | ~$0.134/s (720p), ~$0.20/s (1080p) | MP4 1296×732, 24 fps + AAC audio, ~3.5 min for 3 s |
 
-Weitere Werte: SOUL `resolution` nur `720p`/`1080p`, `aspect_ratio` nur `9:16, 16:9, 4:3, 3:4, 1:1, 2:3, 3:2`.
-Kling 2.5 Turbo: `duration` 5 oder 10, kein `aspect_ratio` (übernimmt das Format des Bildes).
-Kling 4.0 (undokumentiert): `duration` 3–30, `resolution` 720p/**1080p (Default!)**, optional `end_image_url`.
-Ohne Angaben kostet es 2 $ (10 s, 1080p) – Dauer und Auflösung immer explizit setzen. Unbekannte Parameter ignoriert die API still.
+More values: SOUL `resolution` only `720p`/`1080p`, `aspect_ratio` only `9:16, 16:9, 4:3, 3:4, 1:1, 2:3, 3:2`.
+Kling 2.5 Turbo: `duration` 5 or 10, no `aspect_ratio` (takes the format of the image).
+Kling 4.0 (undocumented): `duration` 3–30, `resolution` 720p/**1080p (default!)**, optional `end_image_url`.
+Without these it costs $2 (10 s, 1080p) – always set duration and resolution explicitly. The API silently ignores unknown parameters.
 
-## Bild → Video verketten
+## Chaining image → video
 
 ```bash
 hf run higgsfield-ai/soul/v2/standard --prompt "..." --param aspect_ratio=16:9
-hf status <request_id_des_bildes> --urls   # -> urls[0]
-hf run kling-video/v2.5-turbo/standard/image-to-video --prompt "<Bewegung>" --image-url "<urls[0]>"
+hf status <request_id_of_the_image> --urls   # -> urls[0]
+hf run kling-video/v2.5-turbo/standard/image-to-video --prompt "<motion>" --image-url "<urls[0]>"
 ```
 
-Ergebnis-URLs gelten 7 Tage.
+Result URLs are valid for 7 days.
 
-**Lokale Dateien:** `--image-url` akzeptiert auch einen Pfad (`./foto.jpg`, `~/Bilder/x.png`) – das CLI lädt die
-Datei automatisch hoch (jpg, png, webp, gif). Nur die URL holen: `hf upload <datei>`.
+**Local files:** `--image-url` also accepts a path (`./photo.jpg`, `~/Pictures/x.png`) – the CLI uploads the
+file automatically (jpg, png, webp, gif). Only get the URL: `hf upload <file>`.
 
-**Abbrechen:** `hf cancel <request_id>` – nur solange der Job `queued` ist; ein abgebrochener Job wird erstattet.
+**Cancel:** `hf cancel <request_id>` – only while the job is `queued`; a canceled job is refunded.
 
-## Wiederkehrende Charaktere (Soul ID)
+## Recurring characters (Soul ID)
 
-Vorhandene Charaktere: `hf character list`. Auf einem neuen Rechner fehlen sie dort zunächst – bekannte IDs mit
-`hf character add <Name> <ID>` nachtragen (IDs gelten kontoweit). Nutzen mit `--character <Name>` bei SOUL-Modellen der passenden
-Familie (`model_version` v2 → `higgsfield-ai/soul/v2/standard`); setzt `custom_reference_id` und Stärke 1.0
-(ändern: `--param custom_reference_strength=0.7`, nie 0).
+Existing characters: `hf character list`. On a new machine the list starts empty – add known IDs with
+`hf character add <name> <id>` (IDs are valid account-wide). Use with `--character <name>` on SOUL models of the matching
+family (`model_version` v2 → `higgsfield-ai/soul/v2/standard`); sets `custom_reference_id` and strength 1.0
+(change it: `--param custom_reference_strength=0.7`, never 0).
 
-Neuen Charakter anlegen (getesteter Ablauf, ~2,75 $ gesamt):
-1. Basisporträt: `soul/v2/standard`, frontal, schlichter Hintergrund, `batch_size=4`, User wählt eins (~0,02 $).
-2. Weitere Ansichten **aus diesem einen Bild** per Edit: `alibaba/qwen-image-3/edit --image-urls <basis>`, je 0,04 $.
-   Prompt: Ansicht + „Same woman as in the reference image: identical face, … same hair, same top“.
-   Richtung über die **Bildseite** angeben („nose points toward the RIGHT edge of the image“), nicht „her left“ – sonst falsche Seite.
-   Getrennte Text-zu-Bild-Läufe ergeben verschiedene Personen – nicht verwenden.
-3. Bilder ansehen, Ausreißer neu erzeugen. Bewährt: Profil L, 3/4 L, frontal, 3/4 R, Profil R, frontal lächelnd.
-4. `hf character create <Name> <bilder...> --model-version v2` (2,50 $, vorher bestätigen lassen), dann `character status <Name>`.
-   Training dauert ~7 min (`not_ready` → `in_progress` → `completed`).
+Creating a new character (tested workflow, ~$2.75 total):
+1. Base portrait: `soul/v2/standard`, frontal, plain background, `batch_size=4`, the user picks one (~$0.02).
+2. Further views **from this one image** via edit: `alibaba/qwen-image-3/edit --image-urls <base>`, $0.04 each.
+   Prompt: view + "Same woman as in the reference image: identical face, … same hair, same top".
+   Give the direction by **image side** ("nose points toward the RIGHT edge of the image"), not "her left" – otherwise you get the wrong side.
+   Separate text-to-image runs produce different people – do not use them.
+3. Look at the images, regenerate outliers. Proven set: profile L, 3/4 L, frontal, 3/4 R, profile R, frontal smiling.
+4. `hf character create <name> <images...> --model-version v2` ($2.50, get confirmation first), then `character status <name>`.
+   Training takes ~7 min (`not_ready` → `in_progress` → `completed`).
 
-Erfahrungen (Test „Mila“, 2026-10-30): Identität sitzt in Nah- und Halbnah-Aufnahmen sicher, auch mit neuem Ausdruck
-und Outfit. In Totalen ist das Gesicht zu klein zum Wiedererkennen. Frisur aus den Trainingsbildern (zurückgebunden)
-setzt sich gegen den Prompt („hair loose“) teilweise durch – gewünschte Frisuren schon in den Trainingsbildern variieren.
+Learnings (test "Mila", 2026-10-30): the identity holds reliably in close-ups and medium shots, also with a new expression
+and outfit. In wide shots the face is too small to be recognizable. The hairstyle from the training images (tied back)
+partly wins against the prompt ("hair loose") – vary the desired hairstyles in the training images already.
 
-## Prompt-Muster (kurz)
+## Prompt patterns (short)
 
-- **Bild:** Motiv → Umgebung → Licht → Stil/Kamera. *„A quiet alpine lake at sunrise, low mist, editorial photography“*
-- **Video aus Bild:** nur **Bewegung** beschreiben, nicht das Bild noch einmal: Kamera + Motivbewegung + Atmosphäre.
-  *„slow camera push in over the misty lake, gentle ripples on the water, drifting fog“* (getestet ✓)
-- **Konsistenz über mehrere Clips:** gleiches Startbild bzw. letztes Bild des Vorclips, gleiche Stil-Wörter, eine Kamerabewegung pro Clip.
+- **Image:** subject → setting → light → style/camera. *"A quiet alpine lake at sunrise, low mist, editorial photography"*
+- **Video from image:** describe only the **motion**, not the image again: camera + subject motion + atmosphere.
+  *"slow camera push in over the misty lake, gentle ripples on the water, drifting fog"* (tested ✓)
+- **Consistency across several clips:** same start image or the last frame of the previous clip, same style words, one camera move per clip.
 
-Mehr in [reference.md](reference.md): alle Befehle, Fehlermeldungen, API-Details, ausführliche Prompt-Muster.
+More in [reference.md](reference.md): all commands, error messages, API details, detailed prompt patterns.
 
-## Bekannte Fehler
+## Known errors
 
-| Meldung | Ursache / Lösung |
+| Message | Cause / solution |
 |---|---|
-| `hf: command not found` | Nicht eingerichtet → User bitten, `./setup.sh` im Repo `higgsfield-tools` auszuführen |
-| `HTTP 400: 'x' is a required property` | Pflichtfeld fehlt → `hf info <id>` |
-| `HTTP 400: resolution: '2K' is not one of [...]` | Die Fehlermeldung nennt die erlaubten Werte; die OpenAPI-Datei der Doku ist hier falsch |
-| `Netzwerkfehler ... ConnectTimeout` / Download hängt | Firewall (Little Snitch) blockiert Python → User bitten, Domain freizugeben (`*.higgsfield.ai`, `*.cloudfront.net`, Doku: `vercel-dns.com`) |
-| `Noch kein Katalog vorhanden` | `hf catalog update` |
-| Status `nsfw` / `failed` | Nicht berechnet. Prompt entschärfen bzw. erneut versuchen |
+| `hf: command not found` | Not set up → ask the user to run `./setup.sh` in the `higgsfield-tools` repo |
+| `HTTP 400: 'x' is a required property` | Required field missing → `hf info <id>` |
+| `HTTP 400: resolution: '2K' is not one of [...]` | The error message lists the allowed values; the OpenAPI file in the docs is wrong here |
+| `Network error ... ConnectTimeout` / download hangs | Firewall (Little Snitch) blocks Python → ask the user to allow the domain (`*.higgsfield.ai`, `*.cloudfront.net`, docs: `vercel-dns.com`) |
+| `No catalog yet` | `hf catalog update` |
+| Status `nsfw` / `failed` | Not charged. Tone down the prompt or try again |

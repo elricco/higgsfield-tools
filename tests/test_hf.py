@@ -1,7 +1,7 @@
-"""Tests für hf.py – ohne echte API-Aufrufe.
+"""Tests for hf.py – without real API calls.
 
-Statt HTTP zu senden, bekommen die Funktionen eine FakeSession mit
-vorbereiteten Antworten. time.sleep wird ersetzt, damit nichts wartet.
+Instead of sending HTTP, the functions get a FakeSession with
+prepared responses. time.sleep is replaced so that nothing waits.
 """
 
 import argparse
@@ -14,11 +14,11 @@ import requests
 import hf
 
 
-# --- Hilfsklassen -----------------------------------------------------------
+# --- Helper classes ---------------------------------------------------------
 
 
 class FakeResponse:
-    """Ahmt die Teile von requests.Response nach, die hf.py benutzt."""
+    """Imitates the parts of requests.Response that hf.py uses."""
 
     def __init__(self, status_code: int, body=None, headers: dict | None = None):
         self.status_code = status_code
@@ -30,14 +30,14 @@ class FakeResponse:
 
     def json(self):
         if self._body is None:
-            raise ValueError("kein JSON")
+            raise ValueError("no JSON")
         return self._body
 
 
 class FakeSession:
-    """Gibt nacheinander die vorbereiteten Antworten zurück und merkt sich jeden Aufruf.
+    """Returns the prepared responses one after another and records every call.
 
-    Ein Eintrag kann auch eine Exception sein – dann wird sie geworfen.
+    An entry can also be an exception – then it is raised.
     """
 
     def __init__(self, responses: list):
@@ -53,13 +53,13 @@ class FakeSession:
 
 
 # --- Fixtures ---------------------------------------------------------------
-# Eine Fixture ist eine Funktion, deren Rückgabewert pytest automatisch an Tests
-# übergibt, die einen Parameter mit ihrem Namen haben.
+# A fixture is a function whose return value pytest automatically passes to
+# tests that have a parameter with its name.
 
 
 @pytest.fixture
 def sleeps(monkeypatch):
-    """Ersetzt time.sleep: nichts wartet, aber die Wartezeiten werden notiert."""
+    """Replaces time.sleep: nothing waits, but the wait times are recorded."""
     recorded = []
     monkeypatch.setattr(hf.time, "sleep", lambda seconds: recorded.append(seconds))
     return recorded
@@ -67,7 +67,7 @@ def sleeps(monkeypatch):
 
 @pytest.fixture
 def characters_file(tmp_path, monkeypatch):
-    """Eine characters.json mit einem trainierten Charakter."""
+    """A characters.json with one trained character."""
     path = tmp_path / "characters.json"
     path.write_text(json.dumps({"Mila": {"id": "ref-123", "model_version": "v2", "status": "completed"}}))
     monkeypatch.setattr(hf, "CHARACTERS_FILE", path)
@@ -76,7 +76,7 @@ def characters_file(tmp_path, monkeypatch):
 
 @pytest.fixture
 def models_file(tmp_path, monkeypatch):
-    """Eine kleine models.json im temporären Ordner statt der echten."""
+    """A small models.json in the temporary folder instead of the real one."""
     path = tmp_path / "models.json"
     path.write_text(json.dumps({
         "test/image": {"type": "text-to-image", "defaults": {"aspect_ratio": "4:3", "resolution": "720p"}},
@@ -85,7 +85,7 @@ def models_file(tmp_path, monkeypatch):
     return path
 
 
-# --- Parameter --------------------------------------------------------------
+# --- Parameters -------------------------------------------------------------
 
 
 @pytest.mark.parametrize("text, expected", [
@@ -101,13 +101,13 @@ def test_parse_param(text, expected):
 
 
 def test_parse_param_without_equals_sign():
-    # pytest.raises prüft, dass der Block genau diesen Fehler wirft.
+    # pytest.raises checks that the block raises exactly this error.
     with pytest.raises(hf.CliError, match="key=value"):
         hf.parse_param("duration")
 
 
 def generation_args(**overrides) -> argparse.Namespace:
-    """Argumente wie von 'submit'/'run'; einzelne Felder lassen sich überschreiben."""
+    """Arguments as from 'submit'/'run'; individual fields can be overridden."""
     values = {"model_id": "test/image", "prompt": "p", "image_url": None,
               "image_urls": None, "character": None, "param": []}
     values.update(overrides)
@@ -115,12 +115,12 @@ def generation_args(**overrides) -> argparse.Namespace:
 
 
 def test_build_payload_order(models_file):
-    args = generation_args(prompt="ein See", image_url="https://x/a.jpg",
+    args = generation_args(prompt="a lake", image_url="https://x/a.jpg",
                            param=["resolution=1080p", "seed=7"])
     assert hf.build_payload(args) == {
-        "aspect_ratio": "4:3",          # aus models.json
-        "resolution": "1080p",          # --param überschreibt den Default
-        "prompt": "ein See",
+        "aspect_ratio": "4:3",          # from models.json
+        "resolution": "1080p",          # --param overrides the default
+        "prompt": "a lake",
         "image_url": "https://x/a.jpg",
         "seed": 7,
     }
@@ -146,13 +146,13 @@ def test_build_payload_character_strength_can_be_overridden(models_file, charact
     assert hf.build_payload(args)["custom_reference_strength"] == 0.6
 
 
-# --- Konfiguration ----------------------------------------------------------
+# --- Configuration ----------------------------------------------------------
 
 
 def test_load_dotenv(tmp_path, monkeypatch):
     env = tmp_path / ".env"
     env.write_text(
-        "# Kommentar\n"
+        "# comment\n"
         "\n"
         "HF_API_KEY=key-from-file\n"
         'export HF_API_SECRET="secret=with=equals"\n'
@@ -166,18 +166,18 @@ def test_load_dotenv(tmp_path, monkeypatch):
 
     assert hf.os.environ["HF_API_KEY"] == "key-from-file"
     assert hf.os.environ["HF_API_SECRET"] == "secret=with=equals"
-    # Bereits gesetzte Variablen haben Vorrang vor der Datei.
+    # Variables that are already set take precedence over the file.
     assert hf.os.environ["HF_OTHER"] == "from-shell"
 
 
 def test_load_dotenv_missing_file_is_fine(tmp_path):
-    hf.load_dotenv(tmp_path / "gibt-es-nicht")
+    hf.load_dotenv(tmp_path / "does-not-exist")
 
 
 def test_load_credentials_placeholders(monkeypatch):
     monkeypatch.setenv("HF_API_KEY", "your-api-key-id")
     monkeypatch.setenv("HF_API_SECRET", "your-api-key-secret")
-    with pytest.raises(hf.CliError, match="Platzhalter"):
+    with pytest.raises(hf.CliError, match="placeholders"):
         hf.load_credentials()
 
 
@@ -189,7 +189,7 @@ def test_load_credentials_missing(monkeypatch):
     assert info.value.exit_code == 2
 
 
-# --- Statusauswertung -------------------------------------------------------
+# --- Evaluating the status --------------------------------------------------
 
 
 def test_compact_status_completed():
@@ -226,7 +226,7 @@ def test_extract_outputs_empty():
     assert hf.extract_outputs({"status": "completed"}) == []
 
 
-# --- Dateinamen -------------------------------------------------------------
+# --- File names -------------------------------------------------------------
 
 
 def test_output_filename_single_file():
@@ -245,7 +245,7 @@ def test_output_filename_fallback_extension():
     assert name.endswith("_r1.mp4")
 
 
-# --- Fehlermeldungen --------------------------------------------------------
+# --- Error messages ---------------------------------------------------------
 
 
 @pytest.mark.parametrize("body, expected", [
@@ -264,7 +264,7 @@ def test_describe_error_without_json():
     assert hf.describe_error(response) == "Bad Gateway"
 
 
-# --- api_request: Retry-Verhalten -------------------------------------------
+# --- api_request: retry behavior --------------------------------------------
 
 
 def test_api_request_success(sleeps):
@@ -304,22 +304,22 @@ def test_api_request_gives_up_after_max_attempts(sleeps):
 
 
 def test_api_request_retries_network_errors(sleeps):
-    session = FakeSession([requests.ConnectionError("weg"), FakeResponse(200, {"ok": True})])
+    session = FakeSession([requests.ConnectionError("gone"), FakeResponse(200, {"ok": True})])
     assert hf.api_request(session, "GET", "/x") == {"ok": True}
 
 
 def test_api_request_network_error_message_is_short(sleeps):
-    session = FakeSession([requests.Timeout("langsam")] * hf.MAX_ATTEMPTS)
-    with pytest.raises(hf.CliError, match="Netzwerkfehler nach 4 Versuchen: Timeout"):
+    session = FakeSession([requests.Timeout("slow")] * hf.MAX_ATTEMPTS)
+    with pytest.raises(hf.CliError, match="Network error after 4 attempts: Timeout"):
         hf.api_request(session, "GET", "/x")
 
 
 def test_api_request_empty_body(sleeps):
-    # z. B. cancel: 202 ohne Inhalt
+    # e.g. cancel: 202 without content
     assert hf.api_request(FakeSession([FakeResponse(202)]), "POST", "/x") == {}
 
 
-# --- submit und Polling -----------------------------------------------------
+# --- submit and polling -----------------------------------------------------
 
 
 def test_submit_sends_idempotency_key_and_remembers_model(sleeps, models_file, tmp_path, monkeypatch):
@@ -329,7 +329,7 @@ def test_submit_sends_idempotency_key_and_remembers_model(sleeps, models_file, t
 
     call = session.calls[0]
     assert call["url"] == "https://api.higgsfield.ai/test/image"
-    assert len(call["headers"]["Idempotency-Key"]) == 36  # UUID-Format
+    assert len(call["headers"]["Idempotency-Key"]) == 36  # UUID format
     assert hf.load_history() == {"r42": "test/image"}
 
 
@@ -340,21 +340,21 @@ def test_poll_until_done(sleeps):
         FakeResponse(200, {"request_id": "r1", "status": "completed"}),
     ])
     assert hf.poll_until_done(session, "r1", timeout=600)["status"] == "completed"
-    # Wartezeit wächst: erst ~2 s, dann ~3 s (jeweils plus bis zu 0,5 s Jitter).
+    # The wait time grows: first ~2 s, then ~3 s (each plus up to 0.5 s jitter).
     assert 2.0 <= sleeps[0] <= 2.5
     assert 3.0 <= sleeps[1] <= 3.5
 
 
 def test_poll_until_done_timeout(sleeps, monkeypatch):
-    # Eine Uhr, die bei jedem Ablesen 100 s weiterspringt.
+    # A clock that jumps ahead 100 s every time it is read.
     clock = iter(range(0, 10_000, 100))
     monkeypatch.setattr(hf.time, "monotonic", lambda: next(clock))
     session = FakeSession([FakeResponse(200, {"request_id": "r1", "status": "queued"})] * 10)
-    with pytest.raises(hf.CliError, match="Timeout nach 150 s"):
+    with pytest.raises(hf.CliError, match="Timeout after 150 s"):
         hf.poll_until_done(session, "r1", timeout=150)
 
 
-# --- Upload und Cancel ------------------------------------------------------
+# --- Upload and cancel ------------------------------------------------------
 
 
 UPLOAD_ANSWER = {
@@ -366,7 +366,7 @@ UPLOAD_ANSWER = {
 
 @pytest.fixture
 def fake_put(monkeypatch):
-    """Ersetzt requests.put und merkt sich, was hochgeladen wurde."""
+    """Replaces requests.put and records what was uploaded."""
     calls = []
 
     def put(url, data=None, headers=None, timeout=None):
@@ -378,7 +378,7 @@ def fake_put(monkeypatch):
 
 
 def test_upload_file(tmp_path, fake_put, sleeps):
-    image = tmp_path / "foto.png"
+    image = tmp_path / "photo.png"
     image.write_bytes(b"PNGDATA")
     session = FakeSession([FakeResponse(200, UPLOAD_ANSWER)])
 
@@ -386,30 +386,30 @@ def test_upload_file(tmp_path, fake_put, sleeps):
     assert session.calls[0]["json"] == {"content_type": "image/png"}
     assert fake_put[0]["url"] == "https://storage/presigned"
     assert fake_put[0]["data"] == b"PNGDATA"
-    # Die vorgegebenen Header werden mitgeschickt, aber nie unsere Zugangsdaten.
+    # The given headers are sent along, but never our credentials.
     assert fake_put[0]["headers"]["x-amz-tagging"] == "retention=temporary"
     assert "Authorization" not in fake_put[0]["headers"]
 
 
 def test_upload_rejects_unsupported_type(tmp_path):
-    document = tmp_path / "brief.pdf"
+    document = tmp_path / "letter.pdf"
     document.write_bytes(b"%PDF")
-    with pytest.raises(hf.CliError, match="nicht unterstützt"):
+    with pytest.raises(hf.CliError, match="not supported"):
         hf.upload_file(FakeSession([]), document)
 
 
 def test_upload_missing_file(tmp_path):
-    with pytest.raises(hf.CliError, match="nicht gefunden"):
-        hf.upload_file(FakeSession([]), tmp_path / "gibt-es-nicht.jpg")
+    with pytest.raises(hf.CliError, match="not found"):
+        hf.upload_file(FakeSession([]), tmp_path / "does-not-exist.jpg")
 
 
 def test_resolve_input_url_keeps_urls():
-    # Eine leere FakeSession würde bei jedem Aufruf scheitern – es darf keiner passieren.
+    # An empty FakeSession would fail on every call – none may happen.
     assert hf.resolve_input_url("https://x/a.jpg", FakeSession([])) == "https://x/a.jpg"
 
 
 def test_resolve_input_url_uploads_local_files(tmp_path, fake_put, sleeps):
-    image = tmp_path / "foto.jpg"
+    image = tmp_path / "photo.jpg"
     image.write_bytes(b"JPG")
     session = FakeSession([FakeResponse(200, UPLOAD_ANSWER)])
     assert hf.resolve_input_url(str(image), session) == "https://cdn/input/x.png"
@@ -427,16 +427,16 @@ def test_cancel_success(no_env_file, monkeypatch, capsys):
 def test_cancel_running_job(no_env_file, monkeypatch, capsys):
     monkeypatch.setattr(hf, "make_session", lambda: FakeSession([FakeResponse(400, {"detail": "started"})]))
     assert hf.main(["cancel", "r1"]) == 1
-    assert "läuft bereits" in json.loads(capsys.readouterr().out)["error"]
+    assert "already running" in json.loads(capsys.readouterr().out)["error"]
 
 
-# --- Charaktere -------------------------------------------------------------
+# --- Characters -------------------------------------------------------------
 
 
 def test_find_character_by_name_or_id(characters_file):
     assert hf.find_character("MILA")["id"] == "ref-123"
     assert hf.find_character("ref-123")["name"] == "Mila"
-    with pytest.raises(hf.CliError, match="unbekannt"):
+    with pytest.raises(hf.CliError, match="Unknown character"):
         hf.find_character("Otto")
 
 
@@ -462,7 +462,7 @@ def test_character_create_saves_id(tmp_path, monkeypatch, no_env_file, capsys):
 
 def test_character_create_rejects_duplicate_name(characters_file, no_env_file, capsys):
     assert hf.main(["character", "create", "mila", "https://x/1.jpg"]) == 1
-    assert "schon" in json.loads(capsys.readouterr().out)["error"]
+    assert "already exists" in json.loads(capsys.readouterr().out)["error"]
 
 
 def test_character_add_checks_id_and_saves(tmp_path, monkeypatch, no_env_file, capsys):
@@ -479,7 +479,7 @@ def test_character_add_checks_id_and_saves(tmp_path, monkeypatch, no_env_file, c
 def test_character_add_unknown_id(tmp_path, monkeypatch, no_env_file, capsys):
     monkeypatch.setattr(hf, "CHARACTERS_FILE", tmp_path / "characters.json")
     monkeypatch.setattr(hf, "make_session", lambda: FakeSession([FakeResponse(404, {"detail": "Not found"})]))
-    assert hf.main(["character", "add", "Mila", "falsch"]) == 1
+    assert hf.main(["character", "add", "Mila", "wrong"]) == 1
     assert hf.load_characters() == {}
 
 
@@ -490,11 +490,11 @@ def test_doctor_reports_missing_credentials(no_env_file, monkeypatch, tmp_path, 
     monkeypatch.setattr(hf, "CATALOG_FILE", tmp_path / "missing.json")
     assert hf.main(["doctor"]) == 1
     output = json.loads(capsys.readouterr().out)
-    assert output["error"] == "Problem bei: credentials"
-    assert "fehlt" in output["checks"]["catalog"]
+    assert output["error"] == "Problem with: credentials"
+    assert "missing" in output["checks"]["catalog"]
 
 
-@pytest.mark.parametrize("status_code, expected", [(404, "ok"), (401, "Zugangsdaten falsch (401)")])
+@pytest.mark.parametrize("status_code, expected", [(404, "ok"), (401, "wrong credentials (401)")])
 def test_check_api(monkeypatch, status_code, expected):
     monkeypatch.setenv("HF_API_KEY", "k")
     monkeypatch.setenv("HF_API_SECRET", "s")
@@ -507,10 +507,10 @@ def test_check_api_network_error(monkeypatch):
     monkeypatch.setenv("HF_API_SECRET", "s")
 
     def fail(*args, **kwargs):
-        raise requests.ConnectTimeout("blockiert")
+        raise requests.ConnectTimeout("blocked")
 
     monkeypatch.setattr(hf.requests, "get", fail)
-    assert "Firewall" in hf.check_api()
+    assert "firewall" in hf.check_api()
 
 
 def test_character_status_updates_file(characters_file, no_env_file, monkeypatch, capsys):
@@ -522,18 +522,18 @@ def test_character_status_updates_file(characters_file, no_env_file, monkeypatch
     assert hf.load_characters()["Mila"]["status"] == "in_progress"
 
 
-# --- main: Ausgabe und Exit-Codes -------------------------------------------
+# --- main: output and exit codes --------------------------------------------
 
 
 @pytest.fixture
 def no_env_file(tmp_path, monkeypatch):
-    """Verhindert, dass main() die echte .env des Projekts lädt."""
+    """Prevents main() from loading the project's real .env."""
     monkeypatch.setattr(hf, "ENV_FILE", tmp_path / "no.env")
 
 
 @pytest.fixture
 def catalog_files(tmp_path, monkeypatch, models_file):
-    """Ein kleiner Katalog plus Preise im temporären Ordner."""
+    """A small catalog plus prices in the temporary folder."""
     catalog_path = tmp_path / "catalog.json"
     catalog_path.write_text(json.dumps({"updated": "2026-10-30", "models": {
         "test/image": {"title": "Test Image", "output": "image", "operations": ["text2image"],
@@ -552,7 +552,7 @@ def catalog_files(tmp_path, monkeypatch, models_file):
 
 
 def test_main_prints_one_json_line(catalog_files, no_env_file, capsys):
-    # capsys fängt alles ab, was auf stdout/stderr ausgegeben wird.
+    # capsys captures everything printed to stdout/stderr.
     assert hf.main(["models"]) == 0
     lines = capsys.readouterr().out.splitlines()
     assert len(lines) == 1
@@ -610,7 +610,7 @@ def test_main_error_has_exit_code_and_no_traceback(no_env_file, monkeypatch, cap
     monkeypatch.delenv("HF_API_SECRET", raising=False)
     assert hf.main(["status", "r1"]) == 2
     captured = capsys.readouterr()
-    assert json.loads(captured.out) == {"error": "HF_API_KEY und HF_API_SECRET müssen gesetzt sein."}
+    assert json.loads(captured.out) == {"error": "HF_API_KEY and HF_API_SECRET must be set."}
     assert "Traceback" not in captured.err
 
 

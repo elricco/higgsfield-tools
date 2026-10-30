@@ -10,7 +10,7 @@
       "720p": "0.094",
       "1080p": "0.188"
     },
-    "notes": "resolution: 720p (Standard) oder 1080p – 2K/4K aus der OpenAPI-Datei sind falsch. aspect_ratio: 9:16, 16:9, 4:3, 3:4, 1:1, 2:3, 3:2."
+    "notes": "resolution: 720p (default) or 1080p – 2K/4K from the OpenAPI file are wrong. aspect_ratio: 9:16, 16:9, 4:3, 3:4, 1:1, 2:3, 3:2."
   },
   "higgsfield-ai/soul/v2/standard": {
     "type": "text-to-image",
@@ -22,7 +22,7 @@
     "estimate_usd": {
       "720p": "0.004"
     },
-    "notes": "Getestet 2026-10-30: 720p + 16:9 ergibt PNG 1696x960 (~2 MB), fertig nach ~18 s. resolution: 720p/1080p; aspect_ratio: 9:16, 16:9, 4:3, 3:4, 1:1, 2:3, 3:2."
+    "notes": "Tested 2026-10-30: 720p + 16:9 gives a PNG 1696x960 (~2 MB), done after ~18 s. resolution: 720p/1080p; aspect_ratio: 9:16, 16:9, 4:3, 3:4, 1:1, 2:3, 3:2."
   },
   "minimax/hailuo-2.3/standard/image-to-video": {
     "type": "image-to-video",
@@ -38,7 +38,7 @@
     "estimate_usd": {
       "6s": "0.238"
     },
-    "notes": "duration: 6 oder 10"
+    "notes": "duration: 6 or 10"
   },
   "kling-video/v2.5-turbo/standard/image-to-video": {
     "type": "image-to-video",
@@ -55,7 +55,7 @@
       "5s": "0.179",
       "10s": "0.357"
     },
-    "notes": "Getestet 2026-10-30: 5 s ergibt MP4 H.264 1276x720, 24 fps (~7.9 MB), run komplett ~60 s. duration: 5 oder 10; optional negative_prompt, cfg_scale (0-1). image_url ist Pflicht."
+    "notes": "Tested 2026-10-30: 5 s gives an MP4 H.264 1276x720, 24 fps (~7.9 MB), full run ~60 s. duration: 5 or 10; optional negative_prompt, cfg_scale (0-1). image_url is required."
   },
   "kling-video/v4.0/image-to-video": {
     "type": "image-to-video",
@@ -75,6 +75,6 @@
       "5s 1080p": "0.999",
       "10s 1080p": "1.998"
     },
-    "notes": "Getestet 2026-10-30 (nicht dokumentiert, Parameter per estimate ermittelt): duration 3-30 (ganze Sekunden), resolution 720p/1080p (Default 1080p!), optional end_image_url. Unbekannte Felder werden still ignoriert. 3 s 720p -> MP4 1296x732, 24 fps, MIT Tonspur (AAC, Umgebungsgeräusche), Dauer ~3,5 min."
+    "notes": "Tested 2026-10-30 (undocumented, parameters found via estimate): duration 3-30 (whole seconds), resolution 720p/1080p (default 1080p!), optional end_image_url. Unknown fields are silently ignored. 3 s 720p -> MP4 1296x732, 24 fps, WITH audio track (AAC, ambient sound), takes ~3.5 min."
   }
 }
