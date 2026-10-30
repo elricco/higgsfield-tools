@@ -57,8 +57,8 @@ hf info kling-video/v2.5-turbo/standard/image-to-video
 # Kosten vorab (kostenlos)
 hf estimate higgsfield-ai/soul/v2/standard --prompt "A quiet alpine lake at sunrise"
 
-# Bild erzeugen: in einem Schritt …
-hf run higgsfield-ai/soul/v2/standard --prompt "A quiet alpine lake at sunrise" --param aspect_ratio=16:9
+# Bild erzeugen: in einem Schritt (höchstens 0,01 $) …
+hf run higgsfield-ai/soul/v2/standard --prompt "A quiet alpine lake at sunrise" --param aspect_ratio=16:9 --max-usd 0.01
 
 # … oder einzeln
 hf submit higgsfield-ai/soul/v2/standard --prompt "..."
@@ -71,7 +71,12 @@ hf run kling-video/v2.5-turbo/standard/image-to-video --prompt "slow camera push
 # Wiederkehrender Charakter
 hf character create Mila bild1.png bild2.png ... --model-version v2
 hf run higgsfield-ai/soul/v2/standard --character Mila --prompt "..."
+
+# Was hat heute gekostet?
+hf spend --days 1
 ```
+
+Neben jeder heruntergeladenen Datei liegt eine `.json` mit Prompt, Parametern, Modell und geschätzten Kosten.
 
 ## Befehle
 
@@ -82,11 +87,12 @@ hf run higgsfield-ai/soul/v2/standard --character Mila --prompt "..."
 | `models [--output image\|video] [--op OP] [--search TEXT] [--sort price] [--limit N]` | Modelle auflisten |
 | `info <model>` | Parameter, Pflichtfelder, Preis, eigene Notizen |
 | `estimate <model> --prompt ...` | Kosten vorab in USD |
-| `submit <model> --prompt ... [--image-url URL] [--param k=v]` | Job abschicken |
+| `submit <model> --prompt ... [--image-url URL] [--param k=v] [--max-usd USD]` | Job abschicken |
 | `status <request_id> [--urls]` | aktueller Status, optional Ergebnis-URLs |
 | `wait <request_id> [--timeout 600]` | warten bis fertig |
 | `download <request_id> [--out outputs]` | Dateien speichern |
-| `run <model> --prompt ...` | submit + wait + download |
+| `run <model> --prompt ... [--max-usd USD]` | submit + wait + download |
+| `spend [--days N]` | geschätzte Kosten aus dem Job-Logbuch, je Modell |
 | `cancel <request_id>` | Job abbrechen, solange er `queued` ist |
 | `upload <datei>` | lokale Datei hochladen, gibt öffentliche URL aus |
 | `character create\|status\|list\|add` | Soul-ID-Charaktere trainieren und verwalten |
@@ -94,6 +100,9 @@ hf run higgsfield-ai/soul/v2/standard --character Mila --prompt "..."
 
 Generierungen kennen außerdem `--image-urls A B ...` (Edit-Modelle; lokale Dateien werden hochgeladen) und
 `--character <Name>` (SOUL mit trainiertem Charakter).
+
+`submit` und `run` fragen vorher den Preis ab (kostenlos) und speichern ihn. Mit `--max-usd` oder `HF_MAX_USD` in `.env`
+schicken sie keinen Job ab, dessen Schätzung höher oder unbekannt ist.
 
 Alle Befehle kennen `--verbose` für vollständige Antworten und Stacktraces.
 Exit-Codes: `0` ok, `1` Fehler bzw. Job fehlgeschlagen, `2` Zugangsdaten fehlen.
@@ -109,6 +118,7 @@ Exit-Codes: `0` ok, `1` Fehler bzw. Job fehlgeschlagen, `2` Zugangsdaten fehlen.
 | `models.json` | eigene Notizen und Standardparameter getesteter Modelle (von Hand gepflegt) |
 | `catalog.json`, `prices.json` | erzeugt von `catalog update` bzw. `prices` |
 | `characters.json` | Charakter-Name → Soul-ID (lokal, nicht in Git) |
+| `.hf-history.json` | Job-Logbuch: Modell, Prompt, geschätzte Kosten, Status, Dateipfade (lokal, nicht in Git) |
 | `.claude/skills/higgsfield/` | Skill für Claude Code |
 
 Die Datendateien liegen immer im Repo, egal aus welchem Ordner `hf` aufgerufen wird.

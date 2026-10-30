@@ -19,10 +19,12 @@ For problems with credentials or the network, run `hf doctor` first.
    If `documented: false`, only the required fields from `price.payload` are known.
 3. **State the cost:** `hf estimate <model_id> --prompt "..." [--image-url URL] [--param k=v ...]` (free).
    Ask for the price with the *real* parameters – duration and resolution change it a lot.
-4. **Generate only after the user confirms:**
-   - Image: `hf run <model_id> --prompt "..." --param aspect_ratio=16:9`
+4. **Generate only after the user confirms**, with the confirmed price as a hard limit:
+   - Image: `hf run <model_id> --prompt "..." --param aspect_ratio=16:9 --max-usd <confirmed price>`
    - Video: the same with `run_in_background` and `--timeout 900` – videos take 1–5 minutes.
-5. **Report the result:** only the paths from `files` and the cost if relevant. No raw JSON.
+   `--max-usd` estimates again and refuses to submit if the price is higher or unknown.
+5. **Report the result:** only the paths from `files` and the cost (`usd`). No raw JSON.
+   Next to every file there is a `.json` sidecar with prompt, parameters and cost.
 
 For long jobs or after an interruption: `submit` → `wait <id>` → `download <id>`; the same `request_id` is not charged twice.
 
@@ -33,6 +35,8 @@ For long jobs or after an interruption: `submit` → `wait <id>` → `download <
 - `--verbose` / `-v` only for debugging, not for normal output.
 - Before image-to-video make sure `--image-url` is not empty (public HTTPS URL or an existing local file).
 - If a model is missing from the catalog or the catalog is older than ~2 weeks: `hf catalog update`, then `hf prices` (both free).
+- Spending so far: `hf spend` (all time) or `hf spend --days 1` (today). Estimates, not an invoice.
+- To repeat or vary an earlier result, read its sidecar `.json` (prompt + `payload`).
 
 ## Tested models (as of 2026-10-30)
 
@@ -101,4 +105,6 @@ More in [reference.md](reference.md): all commands, error messages, API details,
 | `HTTP 400: resolution: '2K' is not one of [...]` | The error message lists the allowed values; the OpenAPI file in the docs is wrong here |
 | `Network error ... ConnectTimeout` / download hangs | Firewall (Little Snitch) blocks Python → ask the user to allow the domain (`*.higgsfield.ai`, `*.cloudfront.net`, docs: `vercel-dns.com`) |
 | `No catalog yet` | `hf catalog update` |
+| `Estimated cost ... is above the limit` | Nothing was submitted. Tell the user the new price and ask again |
+| `Price unknown (...)` with `--max-usd` | Token-priced model: explain `pricing` to the user; after confirmation run without `--max-usd` |
 | Status `nsfw` / `failed` | Not charged. Tone down the prompt or try again |

@@ -9,13 +9,14 @@ Only read when needed. The short version is in [SKILL.md](SKILL.md).
 | `models [--output image\|video] [--op OP] [--search TEXT] [--sort name\|price] [--limit N] [--all]` | `{"count", "models": [{"id", "title", "ops", "usd", ...}]}` |
 | `info <model_id>` | title, `required`, `params`, docs `notes`, `docs_url`, `price`, `own_notes` |
 | `estimate <model_id> --prompt ... [--image-url] [--param k=v]` | `{"model", "usd"}` or additionally `"pricing"` (text for token-based billing) |
-| `submit <model_id> --prompt ... [...]` | `{"request_id", "status"}` |
+| `submit <model_id> --prompt ... [--max-usd USD] [...]` | `{"request_id", "status", "usd"}` |
 | `status <request_id> [--urls]` | `{"request_id", "status", ["error"], ["urls"]}` |
 | `cancel <request_id>` | `{"request_id", "status": "canceled"}`; error if the job is already running |
 | `upload <file>` | `{"file", "url"}` – public URL of the uploaded file |
 | `wait <request_id> [--timeout 600]` | final status; polling 2 s → 10 s |
 | `download <request_id> [--out outputs]` | `{"request_id", "status", "files": [...]}` |
-| `run <model_id> --prompt ... [--timeout] [--out]` | like `download` |
+| `run <model_id> --prompt ... [--max-usd USD] [--timeout] [--out]` | like `download` plus `"usd"` |
+| `spend [--days N]` | `{"since", "estimated_usd", "by_model", "jobs", "running", "not_charged", "price_unknown", "untracked"}` |
 | `catalog update [--docs-file PATH]` | builds `catalog.json` from `GET /models` + docs |
 | `prices [filters like models]` | writes `prices.json`, output only counters |
 | `character create <name> <images...> [--model-version v2]` | start Soul ID training ($2.50) |
@@ -27,6 +28,9 @@ Additional generation options: `--image-urls A B ...` (edit models), `--characte
 
 `--param` reads values as JSON: `duration=5` → number, `enhance_prompt=true` → bool, `aspect_ratio=16:9` → text.
 Order in the body: defaults from `models.json` → `--prompt`/`--image-url` → `--param`.
+
+`submit`/`run` always ask `estimate` first (free) and log the price. Limit: `--max-usd`, otherwise `HF_MAX_USD` from the
+environment/`.env`. If the price is higher or unknown, nothing is submitted (exit code 1).
 
 Exit codes: `0` ok, `1` error or job `failed`/`nsfw`/`canceled`, `2` credentials missing.
 
@@ -41,8 +45,8 @@ regardless of the current directory.
 | `catalog.json` | all models: title, operations, parameters, docs notes | `catalog update` |
 | `prices.json` | price per model with date and the placeholder body used | `prices` |
 | `models.json` | own test notes + default parameters of tested models | by hand |
-| `./outputs/` (current directory) | downloads: `<date>_<model>_<request_id>[_n].<extension>` | automatic |
-| `.hf-history.json` | request_id → model (for file names) | automatic |
+| `./outputs/` (current directory) | downloads: `<date>_<model>_<request_id>[_n].<extension>` plus a `.json` sidecar each (prompt, payload, usd) | automatic |
+| `.hf-history.json` | job log: request_id → model, prompt, payload, usd, status, absolute file paths | automatic |
 
 Prices in `prices.json` apply to placeholder inputs with default parameters. For real jobs always run `estimate` with the actual parameters.
 

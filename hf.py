@@ -13,7 +13,7 @@ import sys
 import time
 import traceback
 import uuid
-from datetime import date
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -30,6 +30,10 @@ DOCS_FULL_URL = "https://docs.higgsfield.ai/llms-full.txt"
 
 # Statuses at which a job is finished (success or failure).
 TERMINAL_STATUSES = {"completed", "failed", "nsfw", "canceled"}
+# Finished jobs that Higgsfield does not charge for.
+NOT_CHARGED_STATUSES = {"failed", "nsfw", "canceled"}
+# Optional cost limit per job for all generations, e.g. HF_MAX_USD=0.50 in .env.
+MAX_USD_ENV = "HF_MAX_USD"
 
 # Path(__file__).parent is the folder this file lives in.
 # That way the CLI finds models.json even when called from another folder.
@@ -42,7 +46,7 @@ PRICES_FILE = PROJECT_DIR / "prices.json"
 # Trained Soul ID characters: name -> ID (the API cannot list them).
 CHARACTERS_FILE = PROJECT_DIR / "characters.json"
 ENV_FILE = PROJECT_DIR / ".env"
-# Remembers which model belongs to which request_id (for file names).
+# Job log: model, prompt, estimated cost, status and files per request_id.
 HISTORY_FILE = PROJECT_DIR / ".hf-history.json"
 
 # Maximum number of seconds a single HTTP call may take.
@@ -148,19 +152,40 @@ def load_catalog() -> dict:
 
 
 def load_history() -> dict:
-    """Reads {request_id: model_id} from the history file (empty if it does not exist)."""
+    """Reads the job log {request_id: job} (empty if it does not exist).
+
+    Older versions only stored the model ID as text. Those entries are
+    converted to {"model": ...} so that all entries look the same.
+    """
     if not HISTORY_FILE.exists():
         return {}
     try:
-        return json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
+        history = json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return {}
+    return {
+        request_id: job if isinstance(job, dict) else {"model": job}
+        for request_id, job in history.items()
+    }
 
 
-def remember_request(request_id: str, model_id: str) -> None:
+def update_job(request_id: str, **fields) -> dict:
+    """Merges fields into a job's log entry and returns the updated entry.
+
+    **fields collects all keyword arguments in a dictionary:
+    update_job("r1", status="completed") gives fields == {"status": "completed"}.
+    """
     history = load_history()
-    history[request_id] = model_id
-    HISTORY_FILE.write_text(json.dumps(history, indent=2), encoding="utf-8")
+    job = {**history.get(request_id, {}), **fields}
+    history[request_id] = job
+    write_json_file(HISTORY_FILE, history)
+    return job
+
+
+def record_status(result: dict) -> None:
+    """Stores the status from an API response in the job log."""
+    if result.get("request_id") and result.get("status"):
+        update_job(result["request_id"], status=result["status"])
 
 
 # --- Parameters -------------------------------------------------------------
@@ -460,7 +485,7 @@ def compact_status(result: dict) -> dict:
     output = {"request_id": result.get("request_id"), "status": result.get("status")}
     if result.get("error"):
         output["error"] = result["error"]
-    elif result.get("status") in {"failed", "nsfw", "canceled"}:
+    elif result.get("status") in NOT_CHARGED_STATUSES:
         # So that main() returns a non-zero exit code.
         output["error"] = f"Job ended with status '{result['status']}'"
     return output
@@ -516,21 +541,40 @@ def poll_until_done(session: requests.Session, request_id: str, timeout: int) ->
         delay = min(delay * 1.5, POLL_MAX_DELAY)
 
 
-def save_outputs(result: dict, model_id: str, out_dir: Path) -> list[str]:
-    """Downloads all results and returns the file paths."""
+def sidecar_data(request_id: str, job: dict, file_name: str) -> dict:
+    """What we write next to each result: everything needed to understand or repeat it."""
+    return {
+        "file": file_name,
+        "request_id": request_id,
+        "model": job.get("model"),
+        "prompt": job.get("prompt"),
+        "payload": job.get("payload"),
+        "usd": job.get("usd"),
+        "submitted": job.get("submitted"),
+        "downloaded": datetime.now().isoformat(timespec="seconds"),
+    }
+
+
+def save_outputs(result: dict, job: dict, out_dir: Path) -> list[str]:
+    """Downloads all results, writes a .json sidecar per file and returns the file paths."""
     outputs = extract_outputs(result)
     if not outputs:
         raise CliError("The response contains no result files.")
+    request_id = result["request_id"]
     # parents=True also creates intermediate folders, exist_ok=True ignores existing ones.
     out_dir.mkdir(parents=True, exist_ok=True)
     paths = []
     # enumerate(..., start=1) yields number and element: (1, a), (2, b), ...
     for index, (field, url) in enumerate(outputs, start=1):
-        name = output_filename(model_id, result["request_id"], field, url,
+        name = output_filename(job.get("model", "unknown"), request_id, field, url,
                                index, len(outputs), date.today())
         target = out_dir / name
         download_file(url, target)
+        # with_suffix swaps the extension: x.png -> x.json
+        write_json_file(target.with_suffix(".json"), sidecar_data(request_id, job, name))
         paths.append(str(target))
+    # resolve() gives the absolute path, so the log works from any folder.
+    update_job(request_id, status="completed", files=[str(Path(path).resolve()) for path in paths])
     return paths
 
 
@@ -552,24 +596,77 @@ def cmd_estimate(args: argparse.Namespace) -> dict:
     return output
 
 
+def estimate_cost(session: requests.Session, model_id: str, payload: dict) -> dict:
+    """Asks /estimate for the price: {"usd": number or None, "pricing": text or None}."""
+    result = api_request(session, "POST", f"/estimate/{model_id}", json_body=payload)
+    usd = result.get("usd")
+    # The API sends the amount as text ("0.004"); for adding up we need a number.
+    return {"usd": float(usd) if usd is not None else None, "pricing": result.get("pricing_description")}
+
+
+def max_usd_limit(args: argparse.Namespace) -> float | None:
+    """The cost limit: --max-usd wins, otherwise HF_MAX_USD, otherwise no limit."""
+    if args.max_usd is not None:
+        return args.max_usd
+    value = os.environ.get(MAX_USD_ENV)
+    if not value:
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        raise CliError(f"{MAX_USD_ENV} must be a number, e.g. 0.50 (is '{value}').")
+
+
+def check_budget(cost: dict, max_usd: float | None) -> None:
+    """Stops before submitting if the job would cost more than allowed."""
+    if max_usd is None:
+        return
+    if cost["usd"] is None:
+        reason = cost["pricing"] or "no estimate available"
+        raise CliError(f"Price unknown ({reason}), so the limit of ${max_usd:.3f} cannot be checked. Nothing was submitted.")
+    if cost["usd"] > max_usd:
+        raise CliError(f"Estimated cost ${cost['usd']:.3f} is above the limit of ${max_usd:.3f}. Nothing was submitted.")
+
+
 def submit_generation(session: requests.Session, args: argparse.Namespace) -> dict:
-    """Submits a job and remembers the model for the request_id."""
+    """Checks the price, submits a job and records it in the job log.
+
+    Returns the API response plus "usd" (estimated cost, None if unknown).
+    """
     payload = build_payload(args)
+    max_usd = max_usd_limit(args)
+    try:
+        cost = estimate_cost(session, args.model_id, payload)
+    except CliError as error:
+        # Without a limit the estimate is only nice to have and must not block the job.
+        if max_usd is not None:
+            raise CliError(f"Estimate failed, so the limit cannot be checked: {error}")
+        cost = {"usd": None, "pricing": None}
+    check_budget(cost, max_usd)
     # One idempotency key per job: if api_request repeats the call after a
     # timeout, the server recognizes it and does not create a second (paid) job.
     headers = {"Idempotency-Key": str(uuid.uuid4())}
     result = api_request(session, "POST", f"/{args.model_id}", json_body=payload, headers=headers)
-    remember_request(result["request_id"], args.model_id)
-    return result
+    update_job(
+        result["request_id"],
+        model=args.model_id,
+        prompt=args.prompt,
+        payload=payload,
+        usd=cost["usd"],
+        submitted=datetime.now().isoformat(timespec="seconds"),
+        status=result.get("status"),
+    )
+    return {**result, "usd": cost["usd"]}
 
 
 def cmd_submit(args: argparse.Namespace) -> dict:
     result = submit_generation(make_session(), args)
-    return result if args.verbose else compact_status(result)
+    return result if args.verbose else {**compact_status(result), "usd": result["usd"]}
 
 
 def cmd_status(args: argparse.Namespace) -> dict:
     result = api_request(make_session(), "GET", f"/requests/{args.request_id}/status")
+    record_status(result)
     if args.verbose:
         return result
     output = compact_status(result)
@@ -596,17 +693,19 @@ def cmd_cancel(args: argparse.Namespace) -> dict:
 
 def cmd_wait(args: argparse.Namespace) -> dict:
     result = poll_until_done(make_session(), args.request_id, args.timeout)
+    record_status(result)
     return result if args.verbose else compact_status(result)
 
 
 def cmd_download(args: argparse.Namespace) -> dict:
     result = api_request(make_session(), "GET", f"/requests/{args.request_id}/status")
+    record_status(result)
     if result.get("status") != "completed":
         output = compact_status(result)
         output.setdefault("error", f"Job is not finished yet (status '{result.get('status')}').")
         return output
-    model_id = load_history().get(args.request_id, "unknown")
-    files = save_outputs(result, model_id, args.out)
+    job = load_history().get(args.request_id, {})
+    files = save_outputs(result, job, args.out)
     return {"request_id": args.request_id, "status": "completed", "files": files}
 
 
@@ -614,10 +713,48 @@ def cmd_run(args: argparse.Namespace) -> dict:
     session = make_session()
     submitted = submit_generation(session, args)
     result = poll_until_done(session, submitted["request_id"], args.timeout)
+    record_status(result)
     if result.get("status") != "completed":
         return compact_status(result)
-    files = save_outputs(result, args.model_id, args.out)
-    return {"request_id": result["request_id"], "status": "completed", "files": files}
+    job = load_history().get(result["request_id"], {})
+    files = save_outputs(result, job, args.out)
+    return {"request_id": result["request_id"], "status": "completed", "files": files, "usd": submitted["usd"]}
+
+
+def cmd_spend(args: argparse.Namespace) -> dict:
+    """Adds up the estimated costs of finished jobs from the job log."""
+    # --days 1 means today, --days 7 the last seven days including today.
+    since = (date.today() - timedelta(days=args.days - 1)).isoformat() if args.days else None
+    total = 0.0
+    by_model = {}
+    counts = {"jobs": 0, "running": 0, "not_charged": 0, "price_unknown": 0, "untracked": 0}
+    for job in load_history().values():
+        submitted = job.get("submitted")
+        if not submitted:
+            # Entries from before the job log existed: no price, no date.
+            counts["untracked"] += 1
+            continue
+        # ISO dates compare correctly as text: "2026-10-29" < "2026-10-30".
+        if since and submitted[:10] < since:
+            continue
+        status = job.get("status")
+        if status in NOT_CHARGED_STATUSES:
+            counts["not_charged"] += 1
+        elif status != "completed":
+            counts["running"] += 1
+        elif job.get("usd") is None:
+            counts["price_unknown"] += 1
+        else:
+            counts["jobs"] += 1
+            total += job["usd"]
+            by_model[job["model"]] = by_model.get(job["model"], 0) + job["usd"]
+    return {
+        "since": since or "all",
+        "estimated_usd": round(total, 3),
+        # Most expensive models first.
+        "by_model": {model: round(usd, 3) for model, usd in sorted(by_model.items(), key=lambda item: -item[1])},
+        **counts,
+    }
 
 
 def filtered_models(args: argparse.Namespace) -> dict:
@@ -832,10 +969,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="additional model parameter, can be repeated",
     )
 
+    # Only for commands that really submit a job (submit, run).
+    budget = argparse.ArgumentParser(add_help=False)
+    budget.add_argument("--max-usd", type=float, metavar="USD",
+                        help=f"do not submit if the estimate is higher (default: ${MAX_USD_ENV} if set)")
+
     p = sub.add_parser("estimate", parents=[common, generation], help="estimate the cost up front")
     p.set_defaults(func=cmd_estimate)
 
-    p = sub.add_parser("submit", parents=[common, generation], help="submit a job")
+    p = sub.add_parser("submit", parents=[common, generation, budget], help="submit a job")
     p.set_defaults(func=cmd_submit)
 
     p = sub.add_parser("status", parents=[common], help="status of a job")
@@ -861,10 +1003,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--out", type=Path, default=Path("outputs"))
     p.set_defaults(func=cmd_download)
 
-    p = sub.add_parser("run", parents=[common, generation], help="submit + wait + download")
+    p = sub.add_parser("run", parents=[common, generation, budget], help="submit + wait + download")
     p.add_argument("--timeout", type=int, default=600)
     p.add_argument("--out", type=Path, default=Path("outputs"))
     p.set_defaults(func=cmd_run)
+
+    p = sub.add_parser("spend", parents=[common], help="estimated costs from the job log")
+    p.add_argument("--days", type=int, help="only the last N days (1 = today)")
+    p.set_defaults(func=cmd_spend)
 
     # Filters for models and prices.
     filters = argparse.ArgumentParser(add_help=False)

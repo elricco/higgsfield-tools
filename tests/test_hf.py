@@ -57,6 +57,17 @@ class FakeSession:
 # tests that have a parameter with its name.
 
 
+@pytest.fixture(autouse=True)
+def history_file(tmp_path, monkeypatch):
+    """Runs automatically for every test: the job log lives in the temporary folder.
+
+    autouse=True means no test can accidentally write to the real .hf-history.json.
+    """
+    path = tmp_path / "history.json"
+    monkeypatch.setattr(hf, "HISTORY_FILE", path)
+    return path
+
+
 @pytest.fixture
 def sleeps(monkeypatch):
     """Replaces time.sleep: nothing waits, but the wait times are recorded."""
@@ -109,7 +120,7 @@ def test_parse_param_without_equals_sign():
 def generation_args(**overrides) -> argparse.Namespace:
     """Arguments as from 'submit'/'run'; individual fields can be overridden."""
     values = {"model_id": "test/image", "prompt": "p", "image_url": None,
-              "image_urls": None, "character": None, "param": []}
+              "image_urls": None, "character": None, "param": [], "max_usd": None}
     values.update(overrides)
     return argparse.Namespace(**values)
 
@@ -322,15 +333,110 @@ def test_api_request_empty_body(sleeps):
 # --- submit and polling -----------------------------------------------------
 
 
-def test_submit_sends_idempotency_key_and_remembers_model(sleeps, models_file, tmp_path, monkeypatch):
-    monkeypatch.setattr(hf, "HISTORY_FILE", tmp_path / "history.json")
-    session = FakeSession([FakeResponse(200, {"request_id": "r42", "status": "queued"})])
-    hf.submit_generation(session, generation_args())
+ESTIMATE_OK = FakeResponse(200, {"usd": "0.250"})
+SUBMIT_OK = FakeResponse(200, {"request_id": "r42", "status": "queued"})
 
-    call = session.calls[0]
+
+def test_submit_estimates_then_submits_and_logs_job(sleeps, models_file, no_max_usd):
+    session = FakeSession([ESTIMATE_OK, SUBMIT_OK])
+    result = hf.submit_generation(session, generation_args(prompt="a lake"))
+
+    assert session.calls[0]["url"] == "https://api.higgsfield.ai/estimate/test/image"
+    call = session.calls[1]
     assert call["url"] == "https://api.higgsfield.ai/test/image"
     assert len(call["headers"]["Idempotency-Key"]) == 36  # UUID format
-    assert hf.load_history() == {"r42": "test/image"}
+    assert result["usd"] == 0.25
+    job = hf.load_history()["r42"]
+    assert job["model"] == "test/image"
+    assert job["prompt"] == "a lake"
+    assert job["usd"] == 0.25
+    assert job["status"] == "queued"
+    assert job["payload"]["aspect_ratio"] == "4:3"
+
+
+def test_submit_blocked_by_max_usd(sleeps, models_file, no_max_usd):
+    session = FakeSession([ESTIMATE_OK])
+    with pytest.raises(hf.CliError, match="above the limit of \\$0.200"):
+        hf.submit_generation(session, generation_args(max_usd=0.2))
+    # Only the estimate was sent, nothing was submitted.
+    assert len(session.calls) == 1
+    assert hf.load_history() == {}
+
+
+def test_submit_max_usd_from_environment(sleeps, models_file, monkeypatch):
+    monkeypatch.setenv("HF_MAX_USD", "0.10")
+    with pytest.raises(hf.CliError, match="limit of \\$0.100"):
+        hf.submit_generation(FakeSession([ESTIMATE_OK]), generation_args())
+
+
+def test_submit_option_beats_environment(sleeps, models_file, monkeypatch):
+    monkeypatch.setenv("HF_MAX_USD", "0.10")
+    result = hf.submit_generation(FakeSession([ESTIMATE_OK, SUBMIT_OK]), generation_args(max_usd=1.0))
+    assert result["request_id"] == "r42"
+
+
+def test_submit_unknown_price_with_limit_is_blocked(sleeps, models_file, no_max_usd):
+    session = FakeSession([FakeResponse(200, {"type": "description", "pricing_description": "$0.2/s"})])
+    with pytest.raises(hf.CliError, match="Price unknown \\(\\$0.2/s\\)"):
+        hf.submit_generation(session, generation_args(max_usd=1.0))
+
+
+def test_submit_failing_estimate_without_limit_still_submits(sleeps, models_file, no_max_usd):
+    session = FakeSession([FakeResponse(404, {"detail": "Not found"}), SUBMIT_OK])
+    result = hf.submit_generation(session, generation_args())
+    assert result["usd"] is None
+    assert hf.load_history()["r42"]["usd"] is None
+
+
+def test_load_history_converts_old_entries(history_file):
+    history_file.write_text(json.dumps({"old": "a/b", "new": {"model": "c/d", "usd": 0.1}}))
+    assert hf.load_history() == {"old": {"model": "a/b"}, "new": {"model": "c/d", "usd": 0.1}}
+
+
+def test_save_outputs_writes_sidecar_and_logs_files(tmp_path, monkeypatch):
+    monkeypatch.setattr(hf, "download_file", lambda url, target: target.write_bytes(b"IMG"))
+    job = {"model": "a/b", "prompt": "a lake", "payload": {"prompt": "a lake"}, "usd": 0.004,
+           "submitted": "2026-10-30T10:00:00"}
+    result = {"request_id": "r1", "images": [{"url": "https://cdn/x.png"}]}
+
+    paths = hf.save_outputs(result, job, tmp_path / "out")
+
+    image = tmp_path / "out" / f"{date.today():%Y-%m-%d}_a-b_r1.png"
+    assert paths == [str(image)]
+    sidecar = json.loads(image.with_suffix(".json").read_text())
+    assert sidecar["prompt"] == "a lake"
+    assert sidecar["usd"] == 0.004
+    assert sidecar["file"] == image.name
+    logged = hf.load_history()["r1"]
+    assert logged["status"] == "completed"
+    assert logged["files"] == [str(image.resolve())]
+
+
+def test_spend_adds_up_finished_jobs(history_file, no_env_file, capsys):
+    today = date.today().isoformat()
+    history_file.write_text(json.dumps({
+        "old": "a/b",
+        "r1": {"model": "img", "usd": 0.004, "status": "completed", "submitted": f"{today}T09:00:00"},
+        "r2": {"model": "vid", "usd": 0.4, "status": "completed", "submitted": f"{today}T10:00:00"},
+        "r3": {"model": "vid", "usd": 0.4, "status": "failed", "submitted": f"{today}T11:00:00"},
+        "r4": {"model": "vid", "usd": 0.4, "status": "in_progress", "submitted": f"{today}T12:00:00"},
+        "r5": {"model": "img", "usd": 1.0, "status": "completed", "submitted": "2020-01-01T09:00:00"},
+    }))
+    assert hf.main(["spend", "--days", "1"]) == 0
+    assert json.loads(capsys.readouterr().out) == {
+        "since": today, "estimated_usd": 0.404, "by_model": {"vid": 0.4, "img": 0.004},
+        "jobs": 2, "running": 1, "not_charged": 1, "price_unknown": 0, "untracked": 1,
+    }
+    hf.main(["spend"])
+    assert json.loads(capsys.readouterr().out)["estimated_usd"] == 1.404
+
+
+def test_status_is_recorded_in_job_log(no_env_file, monkeypatch, capsys):
+    monkeypatch.setattr(hf, "make_session", lambda: FakeSession([
+        FakeResponse(200, {"request_id": "r1", "status": "nsfw"}),
+    ]))
+    hf.main(["status", "r1"])
+    assert hf.load_history()["r1"]["status"] == "nsfw"
 
 
 def test_poll_until_done(sleeps):
@@ -523,6 +629,12 @@ def test_character_status_updates_file(characters_file, no_env_file, monkeypatch
 
 
 # --- main: output and exit codes --------------------------------------------
+
+
+@pytest.fixture
+def no_max_usd(monkeypatch):
+    """Makes sure an HF_MAX_USD from the real environment does not affect the test."""
+    monkeypatch.delenv("HF_MAX_USD", raising=False)
 
 
 @pytest.fixture
