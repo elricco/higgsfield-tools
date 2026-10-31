@@ -95,6 +95,7 @@ hf spend --days 1
 # Alle Ergebnisse im Browser (Suche, Filter nach Modell, Bilder/Videos)
 hf gallery
 hf gallery --scan ~/irgendein/ordner   # ältere Ergebnisdateien vorher ins Logbuch aufnehmen
+hf gallery --scan outputs              # übernimmt auch Jobs aus dem Client-Betrieb (aus ihren .json-Sidecars)
 ```
 
 Neben jeder heruntergeladenen Datei liegt eine `.json` mit Prompt, Parametern, Modell und geschätzten Kosten.

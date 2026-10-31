@@ -20,7 +20,7 @@ Only read when needed. The short version is in [SKILL.md](SKILL.md).
 | `estimate ... --variants N\|all` | `{"model", "usd" (each), "variants", "estimated_usd" (total)}` |
 | `batch <file.jsonl> [--model M] [--dry-run] [--max-usd TOTAL] [--out] [--open]` | dry run: `{"jobs": [{"model", "prompt", "usd"}], "estimated_usd"}`; otherwise `{"jobs": [{"request_id", "status", "files", "usd"}], "usd", ["error"]}` |
 | `concat <clips...> [--out-file PATH] [--open]` | `{"file", "clips"}`; joins videos (files or request_ids) with ffmpeg, free |
-| `gallery [--scan FOLDER] [--no-open]` | `{"file", "jobs", "missing_files", ["added_files"]}`; writes `gallery.html` and opens it |
+| `gallery [--scan FOLDER] [--no-open]` | `{"file", "jobs", "missing_files", ["added_files"]}`; writes `gallery.html` and opens it; `--scan` also imports unknown jobs from their `.json` sidecars (e.g. from client mode) |
 | `spend [--days N]` | `{"since", "estimated_usd", "by_model", "jobs", "running", "not_charged", "price_unknown", "untracked"}` |
 | `catalog update [--docs-file PATH]` | builds `catalog.json` from `GET /models` + docs |
 | `prices [filters like models]` | writes `prices.json`, output only counters |

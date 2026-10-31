@@ -862,6 +862,40 @@ def test_scan_adds_old_result_files(history_file, tmp_path):
     assert hf.load_history()["01a18e46-23d4-7f70-b7d6-5e34755ccbc4"]["files"] == [str(image.resolve())]
 
 
+def test_scan_imports_unknown_jobs_from_sidecars(history_file, tmp_path):
+    # E.g. downloaded in client mode: the file and its sidecar exist, the local job log does not know the job.
+    request_id = "01a192de-baa5-7546-a457-1e5587a38a44"
+    image = tmp_path / f"2026-10-31_a-b_{request_id}.png"
+    image.write_bytes(b"x")
+    sidecar = {
+        "request_id": request_id,
+        "model": "a/b",
+        "prompt": "a red kite",
+        "payload": {"prompt": "a red kite"},
+        "usd": 0.004,
+        "submitted": "2026-10-31T17:50:32",
+    }
+    image.with_suffix(".json").write_text(json.dumps(sidecar))
+    # Without a sidecar there is nothing to import.
+    (tmp_path / "2026-10-31_a-b_01a192df-a85d-718f-bd72-b978708f1b1e.png").write_bytes(b"x")
+
+    assert hf.scan_for_results(tmp_path) == 1
+
+    job = hf.load_history()[request_id]
+    assert job["model"] == "a/b" and job["prompt"] == "a red kite" and job["usd"] == 0.004
+    assert job["status"] == "completed"
+    assert job["files"] == [str(image.resolve())]
+    assert hf.summarize_spend(hf.load_history().values(), None)["estimated_usd"] == 0.004
+
+
+def test_scan_ignores_broken_sidecars(history_file, tmp_path):
+    request_id = "01a192de-baa5-7546-a457-1e5587a38a44"
+    (tmp_path / f"x_{request_id}.png").write_bytes(b"x")
+    (tmp_path / f"x_{request_id}.json").write_text("not json")
+    assert hf.scan_for_results(tmp_path) == 0
+    assert hf.load_history() == {}
+
+
 def test_gallery_command_writes_and_opens_page(history_file, no_env_file, tmp_path, capsys, browser_calls):
     assert hf.main(["gallery"]) == 0
     output = json.loads(capsys.readouterr().out)

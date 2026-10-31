@@ -1354,18 +1354,39 @@ def refresh_gallery(open_browser: bool = False) -> None:
         webbrowser.open(GALLERY_FILE.as_uri())
 
 
+# Sidecar fields that are copied into the job log when a job is imported.
+SIDECAR_JOB_FIELDS = ("model", "prompt", "template", "choices", "payload", "usd", "submitted")
+
+
+def job_from_sidecar(path: Path, request_id: str) -> dict | None:
+    """A job log entry from the .json sidecar next to a result file, None if there is no usable one."""
+    try:
+        data = json.loads(path.with_suffix(".json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict) or data.get("request_id") != request_id:
+        return None
+    return {**{key: data[key] for key in SIDECAR_JOB_FIELDS if key in data}, "status": "completed"}
+
+
 def scan_for_results(directory: Path) -> int:
     """Adds result files in a folder to the job log, matched by the request_id in the file name.
 
-    Useful for files that were downloaded before the job log existed.
+    Useful for files that were downloaded before the job log existed. Jobs the log does not know
+    (e.g. downloaded in client mode) are imported from their .json sidecar.
     """
     history = load_history()
     added = 0
     # rglob("*") walks through the folder and all subfolders.
     for path in sorted(directory.expanduser().rglob("*")):
         request_id = gallery.find_request_id(path.name)
-        if not path.is_file() or not gallery.media_kind(path.name) or request_id not in history:
+        if not path.is_file() or not gallery.media_kind(path.name) or not request_id:
             continue
+        if request_id not in history:
+            job = job_from_sidecar(path, request_id)
+            if job is None:
+                continue
+            history[request_id] = job
         files = history[request_id].setdefault("files", [])
         if str(path.resolve()) not in files:
             files.append(str(path.resolve()))

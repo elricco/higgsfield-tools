@@ -93,6 +93,7 @@ hf spend --days 1
 # All results at a glance in the browser (search, filter by model, images/videos)
 hf gallery
 hf gallery --scan ~/some/folder   # add older result files to the job log first
+hf gallery --scan outputs         # also imports jobs from client mode (read from their .json sidecars)
 ```
 
 Next to every downloaded file there is a `.json` sidecar with prompt, parameters, model and estimated cost.
