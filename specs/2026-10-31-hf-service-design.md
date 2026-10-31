@@ -42,6 +42,11 @@ The VPS does not exist yet, so the first version is **done** when (decided with 
    prepared beforehand, including a step-by-step test script in the docs.
 3. A **VPS acceptance checklist** exists in the docs, to be worked through once the VPS runs.
 
+**Status 2026-10-31: first version done.** Live test on the Mac (server 0.2.0, Cloudflare quick tunnel):
+unsigned POST through the tunnel → 400, API through the tunnel → 404; test 1 completed via a signed
+webhook (`submitted` → `webhook_accepted` → `stored` after ~19 s, no `polled`); test 2 with webhooks off
+completed via polling (4 polls, ~21 s). Cost $0.008. Next: VPS acceptance (`docs/vps-acceptance.md`).
+
 ## Goals
 
 1. **Three modes, one program**
