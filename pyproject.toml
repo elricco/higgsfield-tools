@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "higgsfield-tools"
-version = "0.1.0"
+version = "0.2.0"
 description = "Lean CLI for the Higgsfield API (images and videos)"
 requires-python = ">=3.10"
 dependencies = ["requests>=2.32"]

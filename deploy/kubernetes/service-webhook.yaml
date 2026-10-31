@@ -1,0 +1,12 @@
+# Only the webhook port. This is the one Service an ingress may expose publicly.
+apiVersion: v1
+kind: Service
+metadata:
+  name: hf-webhook
+spec:
+  selector:
+    app: hf
+  ports:
+    - name: webhook
+      port: 8081
+      targetPort: webhook

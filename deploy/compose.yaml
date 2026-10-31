@@ -1,0 +1,21 @@
+# Quick start (see docs/server.md):
+#   cp deploy/.env.example deploy/.env    # fill in the values
+#   docker compose -f deploy/compose.yaml up -d
+services:
+  hf:
+    image: ghcr.io/elricco/higgsfield-tools:0.2.0
+    # Or build the image from this repository instead of pulling it:
+    # build: ..
+    env_file: .env
+    environment:
+      # The webhook gets its own port, so only 8081 needs to be reachable from the internet.
+      HF_WEBHOOK_LISTEN: 0.0.0.0:8081
+    ports:
+      - "127.0.0.1:8080:8080" # API for your agents – not public
+      - "8081:8081" # webhook – put an HTTPS reverse proxy or tunnel in front of it
+    volumes:
+      - hf-data:/data
+    restart: unless-stopped
+
+volumes:
+  hf-data:

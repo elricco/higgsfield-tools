@@ -1,0 +1,22 @@
+# Only the code and its data files go into the image – never secrets or local results.
+.git
+.github
+.claude
+.venv
+.env
+.env.*
+outputs
+planning
+.superpowers
+docs
+deploy
+tests
+examples
+__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+*.egg-info
+.hf-history.json
+characters.json
+gallery.html

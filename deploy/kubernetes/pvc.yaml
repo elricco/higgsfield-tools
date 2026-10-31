@@ -1,0 +1,10 @@
+# Job log (hf.db) and stored results. Back up this volume (e.g. with Velero).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: hf-data
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 5Gi

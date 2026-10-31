@@ -1,0 +1,23 @@
+# Example: make ONLY /webhooks/higgsfield reachable from the internet, over HTTPS.
+# Adjust host, ingressClassName and the TLS secret to your cluster (Traefik, nginx, ...).
+# HF_PUBLIC_URL must then be https://hf.example.com
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: hf-webhook
+spec:
+  # ingressClassName: traefik
+  tls:
+    - hosts: ["hf.example.com"]
+      secretName: hf-webhook-tls
+  rules:
+    - host: hf.example.com
+      http:
+        paths:
+          - path: /webhooks/higgsfield
+            pathType: Exact
+            backend:
+              service:
+                name: hf-webhook
+                port:
+                  name: webhook

@@ -26,3 +26,24 @@ jobs:
         run: ruff format --check .
       - name: Tests
         run: python -m pytest -q
+
+  # Builds the container image (without publishing it) and checks that the service starts.
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build image
+        run: docker build -t hf-test .
+      - name: Smoke test
+        run: |
+          docker run --rm hf-test hf --help
+          docker run -d --name hf -e HF_API_KEY=x -e HF_API_SECRET=y -e HF_SERVER_TOKEN=t -p 8080:8080 hf-test
+          for i in $(seq 1 30); do curl -fs http://127.0.0.1:8080/healthz && break; sleep 1; done
+          curl -fs http://127.0.0.1:8080/healthz
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/v1/status)" = 401
+          docker logs hf
+          docker rm -f hf
+      - name: Validate Kubernetes examples
+        run: |
+          docker run --rm -v "$PWD/deploy/kubernetes:/manifests:ro" ghcr.io/yannh/kubeconform:v0.8.0 \
+            -strict -summary /manifests

@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hf
+  labels:
+    app: hf
+spec:
+  # One replica only: the job log is a SQLite file on a ReadWriteOnce volume.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: hf
+  template:
+    metadata:
+      labels:
+        app: hf
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+      containers:
+        - name: hf
+          # Pin an exact version; no "latest".
+          image: ghcr.io/elricco/higgsfield-tools:0.2.0
+          envFrom:
+            - secretRef:
+                name: hf-secrets
+          env:
+            - name: HF_WEBHOOK_LISTEN
+              value: 0.0.0.0:8081
+          ports:
+            - name: api
+              containerPort: 8080
+            - name: webhook
+              containerPort: 8081
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: api
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: api
+            periodSeconds: 30
+          securityContext:
+            allowPrivilegeEscalation: false
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: hf-data

@@ -1,0 +1,25 @@
+# Example: who may talk to hf.
+# - API (8080): only pods labeled hf-client: "true" (your agents).
+# - Webhook (8081): only the ingress controller's namespace (adjust the name).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: hf-ingress
+spec:
+  podSelector:
+    matchLabels:
+      app: hf
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              hf-client: "true"
+      ports:
+        - port: 8080
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress
+      ports:
+        - port: 8081
