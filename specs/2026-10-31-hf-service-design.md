@@ -287,17 +287,17 @@ Service-specific endpoints:
 - Whether to use stdlib `http.server` or a very small framework – only if `http.server` turns out to be
   clearly insufficient; the default is the standard library.
 
-## Follow-ups from the code review (2026-10-31, not yet done)
+## Follow-ups from the code review (2026-10-31) – all done
 
-Small items the whole-branch review found; none blocks the first version.
+Small items the whole-branch review found; all fixed on `feature/hf-service` before merging.
 
-- `GET /v1/jobs?since=` from this spec is not implemented (only `?status=`).
-- A signed webhook without `request_id`, or whose JSON is not an object, gets `500` instead of a clean `400`.
-- The generation path is forwarded URL-decoded: `%3F` in a model ID could add query parameters (only for holders
+- [x] `GET /v1/jobs?since=` from this spec is not implemented (only `?status=`).
+- [x] A signed webhook without `request_id`, or whose JSON is not an object, gets `500` instead of a clean `400`.
+- [x] The generation path is forwarded URL-decoded: `%3F` in a model ID could add query parameters (only for holders
   of the server token). Reject `?`/`#` in model IDs or forward the raw path.
-- `/v1/files/...` reads the whole file into memory; stream it (large videos vs. a 256 MiB pod limit).
-- The Dockerfile `HEALTHCHECK` hard-codes port 8080 (breaks if `HF_LISTEN` changes).
-- The Compose example publishes the webhook port 8081 on all interfaces; `127.0.0.1:8081` is tighter when a reverse
+- [x] `/v1/files/...` reads the whole file into memory; stream it (large videos vs. a 256 MiB pod limit).
+- [x] The Dockerfile `HEALTHCHECK` hard-codes port 8080 (breaks if `HF_LISTEN` changes).
+- [x] The Compose example publishes the webhook port 8081 on all interfaces; `127.0.0.1:8081` is tighter when a reverse
   proxy runs on the same host.
-- The client's `download_server_file` has no retries and leaves a partial file on error.
-- The `webhook_events` table grows forever (belongs to the retention item above).
+- [x] The client's `download_server_file` has no retries and leaves a partial file on error.
+- [x] The `webhook_events` table grows forever (belongs to the retention item above).
