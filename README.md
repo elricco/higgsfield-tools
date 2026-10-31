@@ -112,7 +112,8 @@ Next to every downloaded file there is a `.json` sidecar with prompt, parameters
 | `cancel <request_id>` | cancel a job while it is still `queued` |
 | `upload <file>` | upload a local file, prints its public URL |
 | `character views\|create\|status\|list\|add` | create training views, train and manage Soul ID characters |
-| `doctor` | check the setup: credentials, API, docs, catalog |
+| `doctor` | check the setup: credentials, API, docs, catalog (client mode: the server) |
+| `serve` | run as a service for agents (see [docs/server.md](docs/server.md)) |
 
 Generation commands also accept `--image-urls A B ...` (edit models; local files are uploaded),
 `--character <name>` (SOUL with a trained character) and `--from-last-frame <video or request_id>`
@@ -134,6 +135,8 @@ Exit codes: `0` ok, `1` error or failed job, `2` missing credentials.
 | `hf.py` | the CLI |
 | `catalog.py` | catalog logic (parsing the docs, merging, placeholders) |
 | `gallery.py` | builds the HTML gallery from the job log |
+| `server.py`, `store.py`, `webhooks.py` | `hf serve`: HTTP service, SQLite job store, webhook signature check |
+| `Dockerfile`, `deploy/` | container image and examples for Docker Compose and Kubernetes |
 | `examples/batch.jsonl` | example input for `hf batch` |
 | `pyproject.toml` | package metadata, dependencies, the `hf` command |
 | `setup.sh` | setup on this machine |
@@ -145,6 +148,17 @@ Exit codes: `0` ok, `1` error or failed job, `2` missing credentials.
 | `.claude/skills/higgsfield/` | skill for Claude Code |
 
 The data files always live in the repo, regardless of the directory `hf` is called from.
+
+## Running as a service
+
+Besides running locally, `hf` can run as a service for agents (`hf serve`, usually in a container): it holds the
+Higgsfield credentials, receives completion **webhooks** (with polling as a safety net), stores all results and the
+job log centrally and enforces a cost limit for all agents. Agents use the same commands with
+`HF_SERVER` and `HF_SERVER_TOKEN` set (client mode).
+
+- Operator guide (modes, settings, webhooks, Docker Compose, Kubernetes, agents): [docs/server.md](docs/server.md)
+- Live webhook test on a Mac with a temporary tunnel: [docs/webhook-live-test.md](docs/webhook-live-test.md)
+- Acceptance checklist for a Kubernetes server: [docs/vps-acceptance.md](docs/vps-acceptance.md)
 
 ## Planning documents
 

@@ -26,7 +26,8 @@ Only read when needed. The short version is in [SKILL.md](SKILL.md).
 | `character views <base> [--details TEXT] [--views ...] [--max-usd USD] [--out] [--open]` | 5 training views from one portrait, `{"base", "views": [{"view", "request_id", "status", "files"}], "usd"}`; `--max-usd` applies to the total |
 | `character status <name>` / `character list` | training status / locally known characters |
 | `character add <name> <id>` | register an existing ID locally (checks it for free) |
-| `doctor` | checks credentials, API, docs, catalog age |
+| `doctor` | checks credentials, API, docs, catalog age; in client mode: server reachable, token, webhooks on/off |
+| `serve` | runs the service (settings from the environment, see `docs/server.md`) – not for agents |
 
 Additional generation options: `--image-urls A B ...` (edit models), `--character <name>` (SOUL),
 `--from-last-frame <video or request_id>` (last frame as `image_url`, needs ffmpeg).
@@ -42,6 +43,14 @@ Empty lines and lines starting with `#` are skipped. For `batch` and `character 
 environment/`.env`. If the price is higher or unknown, nothing is submitted (exit code 1).
 
 Exit codes: `0` ok, `1` error or job `failed`/`nsfw`/`canceled`, `2` credentials missing.
+
+## Client mode (HF_SERVER set)
+
+- All Higgsfield calls go through the server; the agent needs no Higgsfield keys.
+- `run`/`wait` wait on the server (long-polling), then copy the stored files plus sidecars into `./outputs`.
+- `download <id>` fetches from the server's storage. `spend` and `character ...` use the server's central data.
+- The server estimates and may refuse (`HTTP 403`) by its own `HF_MAX_USD` / `HF_ALLOW_UNPRICED` policy.
+- Not available: `gallery`; `concat` results are not added to the central log.
 
 ## Files
 

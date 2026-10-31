@@ -10,6 +10,11 @@ directory (different location: `--out <folder>`).
 Every command prints **one line of JSON**; exit code ≠ 0 means error (`{"error": ...}`).
 For problems with credentials or the network, run `hf doctor` first.
 
+**Client mode:** if `hf doctor` shows `"mode": "client"`, `hf` talks to an hf server instead of Higgsfield
+(`HF_SERVER` is set). Nothing changes in how you use it – `run` still returns local files in `./outputs`.
+The server may refuse a job by its cost policy (`HTTP 403`): tell the user the reason, do not retry with other
+settings on your own. `hf gallery` is not available in client mode.
+
 ## Workflow
 
 1. **Find a model** (from the local catalog, free):
@@ -122,6 +127,9 @@ More in [reference.md](reference.md): all commands, error messages, API details,
 | `HTTP 400: resolution: '2K' is not one of [...]` | The error message lists the allowed values; the OpenAPI file in the docs is wrong here |
 | `Network error ... ConnectTimeout` / download hangs | Firewall (Little Snitch) blocks Python → ask the user to allow the domain (`*.higgsfield.ai`, `*.cloudfront.net`, docs: `vercel-dns.com`) |
 | `No catalog yet` | `hf catalog update` |
+| `HTTP 401: Missing or wrong HF_SERVER_TOKEN` | Client mode: token does not match the server – ask the user |
+| `HTTP 403: Estimated cost ... above the limit` (client mode) | The server's limit – tell the user; only they can change it |
+| `HTTP 403: Price unknown ... HF_ALLOW_UNPRICED` | Token-priced model blocked by the server – only the owner can allow it |
 | `Estimated cost ... is above the limit` | Nothing was submitted. Tell the user the new price and ask again |
 | `Price unknown (...)` with `--max-usd` | Token-priced model: explain `pricing` to the user; after confirmation run without `--max-usd` |
 | Status `nsfw` / `failed` | Not charged. Tone down the prompt or try again |

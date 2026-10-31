@@ -114,7 +114,8 @@ Neben jeder heruntergeladenen Datei liegt eine `.json` mit Prompt, Parametern, M
 | `cancel <request_id>` | Job abbrechen, solange er `queued` ist |
 | `upload <datei>` | lokale Datei hochladen, gibt öffentliche URL aus |
 | `character views\|create\|status\|list\|add` | Trainingsansichten erzeugen, Soul-ID-Charaktere trainieren und verwalten |
-| `doctor` | Einrichtung prüfen: Zugangsdaten, API, Doku, Katalog |
+| `doctor` | Einrichtung prüfen: Zugangsdaten, API, Doku, Katalog (im Client-Betrieb: den Server) |
+| `serve` | als Dienst für Agents laufen (siehe [docs/server.md](docs/server.md)) |
 
 Generierungen kennen außerdem `--image-urls A B ...` (Edit-Modelle; lokale Dateien werden hochgeladen),
 `--character <Name>` (SOUL mit trainiertem Charakter) und `--from-last-frame <Video oder request_id>`
@@ -136,6 +137,8 @@ Exit-Codes: `0` ok, `1` Fehler bzw. Job fehlgeschlagen, `2` Zugangsdaten fehlen.
 | `hf.py` | das CLI |
 | `catalog.py` | Katalog-Logik (Doku auslesen, zusammenführen, Platzhalter) |
 | `gallery.py` | baut die HTML-Galerie aus dem Job-Logbuch |
+| `server.py`, `store.py`, `webhooks.py` | `hf serve`: HTTP-Dienst, SQLite-Logbuch, Prüfung der Webhook-Signatur |
+| `Dockerfile`, `deploy/` | Container-Image und Beispiele für Docker Compose und Kubernetes |
 | `examples/batch.jsonl` | Beispiel-Eingabe für `hf batch` |
 | `pyproject.toml` | Paketbeschreibung, Abhängigkeiten, Befehl `hf` |
 | `setup.sh` | Einrichtung auf diesem Rechner |
@@ -147,6 +150,17 @@ Exit-Codes: `0` ok, `1` Fehler bzw. Job fehlgeschlagen, `2` Zugangsdaten fehlen.
 | `.claude/skills/higgsfield/` | Skill für Claude Code |
 
 Die Datendateien liegen immer im Repo, egal aus welchem Ordner `hf` aufgerufen wird.
+
+## Als Dienst betreiben
+
+Neben dem lokalen Betrieb kann `hf` als Dienst für Agents laufen (`hf serve`, meist im Container): Er hält die
+Higgsfield-Zugangsdaten, empfängt **Webhooks** bei fertigen Jobs (Polling als Sicherheitsnetz), speichert alle
+Ergebnisse und das Job-Logbuch zentral und setzt ein Kostenlimit für alle Agents durch. Agents nutzen dieselben
+Befehle, wenn `HF_SERVER` und `HF_SERVER_TOKEN` gesetzt sind (Client-Betrieb).
+
+- Betriebsanleitung (Betriebsarten, Variablen, Webhooks, Docker Compose, Kubernetes, Agents): [docs/server.md](docs/server.md) (Englisch)
+- Live-Test der Webhooks auf dem Mac mit einem temporären Tunnel: [docs/webhook-live-test.md](docs/webhook-live-test.md)
+- Abnahme-Checkliste für einen Kubernetes-Server: [docs/vps-acceptance.md](docs/vps-acceptance.md)
 
 ## Planungsdokumente
 
