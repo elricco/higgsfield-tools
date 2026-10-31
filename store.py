@@ -12,46 +12,34 @@ from pathlib import Path
 
 from hf import TERMINAL_STATUSES
 
-# Columns of the jobs table. The ones in JSON_FIELDS hold lists or dicts as JSON text.
-JOB_FIELDS = (
-    "request_id",
-    "model",
-    "prompt",
-    "payload",
-    "usd",
-    "kind",
-    "status",
-    "error",
-    "result",
-    "expires_at",
-    "submitted",
-    "last_polled",
-    "stored",
-    "files",
-    "download_error",
-    "idempotency_key",
-)
+# Columns of the jobs table and their SQLite types. The ones in JSON_FIELDS hold lists or dicts as JSON text.
+JOB_COLUMNS = {
+    "request_id": "TEXT PRIMARY KEY",
+    "model": "TEXT",
+    "prompt": "TEXT",
+    "payload": "TEXT",
+    "usd": "REAL",
+    "kind": "TEXT",
+    "status": "TEXT",
+    "error": "TEXT",
+    "result": "TEXT",
+    "expires_at": "TEXT",
+    "submitted": "TEXT",
+    "last_polled": "REAL",
+    "stored": "INTEGER NOT NULL DEFAULT 0",
+    "files": "TEXT",
+    "download_error": "TEXT",
+    "download_attempts": "INTEGER NOT NULL DEFAULT 0",
+    "next_download": "REAL",
+    "idempotency_key": "TEXT UNIQUE",
+}
+JOB_FIELDS = tuple(JOB_COLUMNS)
 JSON_FIELDS = {"payload", "result", "files"}
+# Fields that describe the state at Higgsfield. Once a job is finished, older states must not overwrite them.
+STATUS_FIELDS = ("status", "result", "error", "expires_at")
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS jobs (
-    request_id TEXT PRIMARY KEY,
-    model TEXT,
-    prompt TEXT,
-    payload TEXT,
-    usd REAL,
-    kind TEXT,
-    status TEXT,
-    error TEXT,
-    result TEXT,
-    expires_at TEXT,
-    submitted TEXT,
-    last_polled REAL,
-    stored INTEGER NOT NULL DEFAULT 0,
-    files TEXT,
-    download_error TEXT,
-    idempotency_key TEXT UNIQUE
-);
+SCHEMA = f"""
+CREATE TABLE IF NOT EXISTS jobs ({", ".join(f"{name} {kind}" for name, kind in JOB_COLUMNS.items())});
 CREATE TABLE IF NOT EXISTS webhook_events (
     webhook_id TEXT PRIMARY KEY
 );
@@ -80,7 +68,19 @@ class JobStore:
             # WAL lets readers and the writer work at the same time and survives crashes well.
             self._db.execute("PRAGMA journal_mode=WAL")
             self._db.executescript(SCHEMA)
+            self._add_missing_columns()
             self._db.commit()
+
+    def _add_missing_columns(self) -> None:
+        """A database from an older version lacks newer columns: add them (a tiny migration)."""
+        existing = {row["name"] for row in self._db.execute("PRAGMA table_info(jobs)")}
+        for name, kind in JOB_COLUMNS.items():
+            if name not in existing:
+                # SQLite cannot add a UNIQUE column later; the uniqueness then comes from an index.
+                plain = kind.replace(" UNIQUE", "")
+                self._db.execute(f"ALTER TABLE jobs ADD COLUMN {name} {plain}")
+                if "UNIQUE" in kind:
+                    self._db.execute(f"CREATE UNIQUE INDEX IF NOT EXISTS jobs_{name} ON jobs ({name})")
 
     # --- Jobs ---------------------------------------------------------------
 
@@ -99,22 +99,42 @@ class JobStore:
             raise ValueError(f"Unknown job fields: {', '.join(sorted(unknown))}")
         with self._lock:
             job = self.get_job(request_id) or {"request_id": request_id}
-            # A webhook can arrive before the submit response is saved: never go back from "completed" to "queued".
-            if job.get("status") in TERMINAL_STATUSES and fields.get("status") not in TERMINAL_STATUSES:
-                fields.pop("status", None)
+            # Answers can arrive out of order (a webhook before the submit response, a slow poll after
+            # completion). Once finished, an unfinished state must not overwrite status or result.
+            if (
+                job.get("status") in TERMINAL_STATUSES
+                and "status" in fields
+                and fields["status"] not in TERMINAL_STATUSES
+            ):
+                for field in STATUS_FIELDS:
+                    fields.pop(field, None)
             job.update(fields)
-            values = [
-                json.dumps(job.get(f)) if f in JSON_FIELDS and job.get(f) is not None else job.get(f)
-                for f in JOB_FIELDS
-            ]
-            values[JOB_FIELDS.index("stored")] = int(bool(job.get("stored")))
-            placeholders = ", ".join("?" for _ in JOB_FIELDS)
-            # "?" placeholders let sqlite3 insert the values safely – never build SQL from text yourself.
-            self._db.execute(f"INSERT OR REPLACE INTO jobs ({', '.join(JOB_FIELDS)}) VALUES ({placeholders})", values)
+            try:
+                self._write(job)
+            except sqlite3.IntegrityError:
+                # Another job already uses this Idempotency-Key: keep both jobs, drop the key on this one.
+                job["idempotency_key"] = None
+                self._write(job)
             self._db.commit()
             # Wake up everyone waiting in wait_until().
             self.changed.notify_all()
             return self.get_job(request_id)
+
+    def _write(self, job: dict) -> None:
+        values = [
+            json.dumps(job.get(f)) if f in JSON_FIELDS and job.get(f) is not None else job.get(f) for f in JOB_FIELDS
+        ]
+        values[JOB_FIELDS.index("stored")] = int(bool(job.get("stored")))
+        values[JOB_FIELDS.index("download_attempts")] = job.get("download_attempts") or 0
+        columns = ", ".join(JOB_FIELDS)
+        placeholders = ", ".join("?" for _ in JOB_FIELDS)
+        updates = ", ".join(f"{field} = excluded.{field}" for field in JOB_FIELDS if field != "request_id")
+        # A real upsert: update the existing row. ("INSERT OR REPLACE" would delete a row that only
+        # shares the Idempotency-Key with this one.) "?" placeholders insert values safely.
+        self._db.execute(
+            f"INSERT INTO jobs ({columns}) VALUES ({placeholders}) ON CONFLICT(request_id) DO UPDATE SET {updates}",
+            values,
+        )
 
     def get_job(self, request_id: str) -> dict | None:
         with self._lock:
@@ -135,12 +155,19 @@ class JobStore:
         """Jobs that are not finished yet (also those without any status)."""
         return [job for job in self.list_jobs() if job["status"] not in TERMINAL_STATUSES]
 
-    def jobs_to_store(self) -> list[dict]:
-        """Completed jobs whose files are not downloaded yet (and did not fail to download)."""
+    def jobs_to_store(self, now: float | None = None) -> list[dict]:
+        """Completed jobs whose files still have to be downloaded (and are due, if now is given).
+
+        Trainings have no files. Jobs with download_error were given up for good.
+        """
         return [
             job
             for job in self.list_jobs()
-            if job["status"] == "completed" and not job["stored"] and not job["download_error"]
+            if job["status"] == "completed"
+            and job["kind"] != "training"
+            and not job["stored"]
+            and not job["download_error"]
+            and (now is None or job["next_download"] is None or job["next_download"] <= now)
         ]
 
     # --- Webhooks -----------------------------------------------------------

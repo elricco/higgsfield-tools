@@ -18,7 +18,8 @@ One instance belongs to one person or team – there are no user accounts.
 2. The server estimates the price (free) and applies its cost policy (see below).
 3. The server submits the job to Higgsfield – with a webhook address if webhooks are on.
 4. Higgsfield reports completion **by webhook**; if that never arrives, the server's **polling** finds it.
-5. The server downloads the result and its `.json` sidecar into `HF_DATA_DIR/files/<date>/`.
+5. The server downloads the result and its `.json` sidecar into `HF_DATA_DIR/files/<date>/`. A failed download is
+   retried after 1, 2, 4 ... minutes (at most hourly) until Higgsfield deletes the files after 7 days.
 6. The agent's `hf run` was waiting on the server (long-polling) and now copies the files into `./outputs`.
 
 ## Settings (environment variables)
@@ -44,7 +45,7 @@ Locally, `.env` in the repository is read as well; variables already set in the 
 
 - `HF_API_KEY`, `HF_API_SECRET` or `HF_SERVER_TOKEN` is missing,
 - only one of `HF_PUBLIC_URL` / `HF_WEBHOOK_SECRET` is set (set both for webhooks, or neither for polling),
-- `HF_PUBLIC_URL` does not start with `https://`,
+- `HF_PUBLIC_URL` does not start with `https://`, or `HF_WEBHOOK_SECRET` is not a valid `whsec_` secret,
 - `HF_SERVER` is set (a server must not run in client mode),
 - a number or `host:port` value cannot be read.
 
@@ -173,6 +174,9 @@ What does **not** work in client mode yet: `hf gallery` (planned as a page of th
 
 ## Backups
 
+Request bodies are limited to 1 MB and slow clients are disconnected after 30 seconds (this also protects the
+public webhook port).
+
 Everything the server knows lives in `HF_DATA_DIR`: `hf.db` (job log, webhook IDs, characters) and `files/`.
 Back up that one volume (for example with Velero on Kubernetes, or a volume backup with Docker).
 Higgsfield deletes its copies after 7 days – the server's copy is the one that lasts.
@@ -181,7 +185,8 @@ Higgsfield deletes its copies after 7 days – the server's copy is the one that
 
 The server writes one JSON line per event to stdout (`docker logs`, `kubectl logs`):
 `server_started`, `submitted`, `refused`, `training_started`, `webhook_accepted`, `webhook_rejected`, `polled`,
-`poll_failed`, `stored`, `download_failed`, `worker_error`, `server_stopped`. Secrets and tokens never appear.
+`poll_failed`, `stored`, `download_failed` (with `attempts` and `gave_up`), `request_error`, `worker_error`,
+`server_stopped`. Secrets and tokens never appear.
 
 ## Troubleshooting
 
@@ -192,6 +197,7 @@ The server writes one JSON line per event to stdout (`docker logs`, `kubectl log
 | `HTTP 403: Price unknown for ... ask the owner` | Token-priced model while `HF_MAX_USD` is set. The owner can allow it with `HF_ALLOW_UNPRICED`. |
 | Log shows `webhook_rejected` | Wrong `HF_WEBHOOK_SECRET`, or the server clock is more than 5 minutes off. |
 | No `webhook_accepted` at all, jobs finish only after `HF_FALLBACK_POLL_SECONDS` | Higgsfield cannot reach `HF_PUBLIC_URL`: not HTTPS, not public, wrong path or port. Polling still completes the jobs. |
-| `download_failed` | The result URL expired (7 days) or the CDN is blocked by a firewall. |
+| `download_failed` with `"gave_up": false` | Temporary; the server tries again with growing pauses. |
+| `download_failed` with `"gave_up": true` | The result expired at Higgsfield (7 days) before a download worked – check the firewall for the CDN. |
 | `hf doctor` (client): `unreachable` | `HF_SERVER` wrong, server not running, or a NetworkPolicy blocks the agent pod. |
 | Server exits right after start with an error | See "fails closed" above – the message names the variable. |

@@ -32,7 +32,7 @@ def test_all_variables():
         HF_LISTEN="127.0.0.1:9000",
         HF_WEBHOOK_LISTEN="0.0.0.0:9001",
         HF_PUBLIC_URL="https://hf.example.com/",
-        HF_WEBHOOK_SECRET="whsec_abc",
+        HF_WEBHOOK_SECRET="whsec_dGVzdC1rZXk=",
         HF_FALLBACK_POLL_SECONDS="60",
         HF_MAX_USD="0.5",
         HF_ALLOW_UNPRICED="a/b, c/d",
@@ -137,3 +137,8 @@ def test_budget_refusal_messages():
 )
 def test_route(method, path, expected):
     assert server.route(method, path) == expected
+
+
+def test_malformed_webhook_secret_is_refused():
+    with pytest.raises(hf.CliError, match="HF_WEBHOOK_SECRET"):
+        config(HF_PUBLIC_URL="https://x.example.com", HF_WEBHOOK_SECRET="whsec_not base64!")

@@ -1,6 +1,7 @@
 """Tests for hf serve: a real HTTP server on 127.0.0.1, Higgsfield replaced by a FakeSession."""
 
 import json
+import threading
 import time
 from pathlib import Path
 
@@ -254,8 +255,6 @@ def test_wait_returns_when_worker_stores_later(start_server):
     send_webhook(app, completed_event())
     started = time.monotonic()
     # The worker thread is off; run it once shortly after the wait began.
-    import threading
-
     threading.Timer(0.2, app.run_worker_once).start()
     record = requests.get(url(app, "/v1/jobs/r1?wait=10"), headers=AUTH, timeout=15).json()
     assert record["stored"] is True
@@ -342,17 +341,142 @@ def test_restart_resumes_open_jobs(start_server):
     assert second.store.get_job("r1")["stored"] is True
 
 
-def test_failed_download_is_recorded_not_retried_forever(start_server, monkeypatch):
+def test_failed_download_is_retried_with_backoff_then_given_up(start_server, monkeypatch):
+    attempts = []
+
     def broken(url, target):
-        raise hf.CliError("Download failed: HTTP 404")
+        attempts.append(url)
+        raise hf.CliError("Download failed: HTTP 503")
 
     monkeypatch.setattr(hf, "download_file", broken)
     app, _ = start_server(**WEBHOOKS_ON)
+    now = time.time()
+    app.clock = lambda: now
+    event = {**completed_event(), "expires_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now + 3600))}
+    send_webhook(app, event)
+
+    app.run_worker_once()
+    job = app.store.get_job("r1")
+    assert (job["download_attempts"], job["download_error"], job["stored"]) == (1, None, False)
+    app.run_worker_once()  # not due yet: no new attempt
+    assert len(attempts) == 1
+
+    app.clock = lambda: now + 120
+    app.run_worker_once()
+    assert len(attempts) == 2
+
+    app.clock = lambda: now + 4000  # after expires_at: Higgsfield has deleted the files
+    app.run_worker_once()
+    assert app.store.get_job("r1")["download_error"] == "Download failed: HTTP 503"
+    assert app.store.jobs_to_store(now + 99999) == []
+
+
+def test_retry_succeeds_after_a_temporary_failure(start_server, monkeypatch):
+    calls = []
+
+    def flaky(url, target):
+        calls.append(url)
+        if len(calls) == 1:
+            raise requests.exceptions.ChunkedEncodingError("connection reset")
+        target.write_bytes(b"IMG")
+
+    monkeypatch.setattr(hf, "download_file", flaky)
+    app, _ = start_server(**WEBHOOKS_ON)
+    now = time.time()
+    app.clock = lambda: now
     send_webhook(app, completed_event())
     app.run_worker_once()
-    record = requests.get(url(app, "/v1/jobs/r1?wait=1"), headers=AUTH, timeout=5).json()
-    assert record["download_error"] == "Download failed: HTTP 404"
-    assert app.store.jobs_to_store() == []
+    app.clock = lambda: now + 120
+    app.run_worker_once()
+    assert app.store.get_job("r1")["stored"] is True
+
+
+def test_missing_result_files_trigger_a_fresh_poll(start_server):
+    app, fake = start_server([FakeResponse(200, IMAGE_RESULT)], **WEBHOOKS_ON)
+    # A completed webhook without payload (e.g. an unexpected format): ask Higgsfield before giving up.
+    send_webhook(app, {"request_id": "r1", "status": "completed", "error": None, "payload": None})
+    app.run_worker_once()
+    assert fake.calls[0]["url"] == "https://api.higgsfield.ai/requests/r1/status"
+    assert app.store.get_job("r1")["stored"] is True
+
+
+def test_worker_does_not_spin_on_unexpected_download_errors(start_server, monkeypatch):
+    attempts = []
+
+    def reset(url, target):
+        attempts.append(url)
+        raise requests.exceptions.ChunkedEncodingError("connection reset mid-stream")
+
+    monkeypatch.setattr(hf, "download_file", reset)
+    monkeypatch.setattr(server, "log_event", lambda event, **fields: None)
+    app, _ = start_server(worker=True, **WEBHOOKS_ON)
+    send_webhook(app, completed_event())
+    # Event().wait instead of time.sleep: the fake_downloads fixture switches time.sleep off.
+    threading.Event().wait(1)
+    assert 1 <= len(attempts) <= 2
+
+
+def test_concurrent_retries_with_same_key_submit_once(start_server):
+    class SlowHiggsfield:
+        """Answers by URL: estimates at once, submissions slowly and with a new ID each time."""
+
+        def __init__(self):
+            self.submits = 0
+
+        def request(self, method, url, json=None, headers=None, timeout=None):
+            if "/estimate/" in url:
+                return FakeResponse(200, {"usd": "0.004"})
+            threading.Event().wait(0.5)  # Higgsfield takes a while (time.sleep is switched off in these tests)
+            self.submits += 1
+            return FakeResponse(200, {"request_id": f"r{self.submits}", "status": "queued"})
+
+    slow = SlowHiggsfield()
+    app, _ = start_server()
+    app.session_factory = lambda: slow
+    results = []
+    threads = [threading.Thread(target=lambda: results.append(submit(app, key="same").json())) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert slow.submits == 1
+    assert [result["request_id"] for result in results] == ["r1", "r1"]
+
+
+def test_unexpected_higgsfield_answer_gives_json_error(start_server, monkeypatch):
+    monkeypatch.setattr(server, "log_event", lambda event, **fields: None)
+    app, _ = start_server([FakeResponse(200, {"usd": "0.004"}), FakeResponse(200, {"unexpected": True})])
+    response = submit(app)
+    assert response.status_code == 500
+    assert "KeyError" in response.json()["detail"]
+
+
+def raw_request(app, method, path, headers, body=b"", port=None):
+    import http.client
+
+    host, api_port = app.api_address
+    connection = http.client.HTTPConnection(host, port or api_port, timeout=5)
+    connection.putrequest(method, path)
+    for name, value in headers.items():
+        connection.putheader(name, value)
+    connection.endheaders()
+    if body:
+        connection.send(body)
+    response = connection.getresponse()
+    status = response.status
+    connection.close()
+    return status
+
+
+def test_bad_content_length_is_400(start_server):
+    app, _ = start_server(**WEBHOOKS_ON)
+    assert raw_request(app, "POST", "/webhooks/higgsfield", {"Content-Length": "abc"}) == 400
+    assert raw_request(app, "POST", "/webhooks/higgsfield", {"Content-Length": "-5"}) == 400
+
+
+def test_huge_body_is_refused_without_reading_it(start_server):
+    app, _ = start_server(**WEBHOOKS_ON)
+    assert raw_request(app, "POST", "/webhooks/higgsfield", {"Content-Length": str(50_000_000)}) == 413
 
 
 # --- Other endpoints --------------------------------------------------------

@@ -80,3 +80,43 @@ def test_wait_until_wakes_on_change(store):
 
 def test_wait_until_times_out(store):
     assert store.wait_until(lambda: False, 0.05) is False
+
+
+# --- Review fixes -----------------------------------------------------------
+
+
+def test_stale_update_does_not_overwrite_a_finished_result(store):
+    store.upsert_job("r1", status="completed", result={"images": [{"url": "u"}]}, expires_at="2026-11-07T00:00:00Z")
+    # A slow poll that started before completion answers late with an older state.
+    job = store.upsert_job("r1", status="in_progress", result={"status": "in_progress"}, error=None, expires_at=None)
+    assert job["status"] == "completed"
+    assert job["result"] == {"images": [{"url": "u"}]}
+    assert job["expires_at"] == "2026-11-07T00:00:00Z"
+
+
+def test_same_idempotency_key_never_deletes_a_job(store):
+    store.upsert_job("a", idempotency_key="k", usd=0.4)
+    store.upsert_job("b", idempotency_key="k", usd=0.4)
+    assert sorted(job["request_id"] for job in store.list_jobs()) == ["a", "b"]
+    assert store.find_by_idempotency_key("k")["request_id"] == "a"
+
+
+def test_jobs_to_store_respects_next_download_and_skips_trainings(store):
+    store.upsert_job("now", status="completed")
+    store.upsert_job("later", status="completed", next_download=200.0)
+    store.upsert_job("training", status="completed", kind="training")
+    assert [job["request_id"] for job in store.jobs_to_store(now=100.0)] == ["now"]
+    assert sorted(job["request_id"] for job in store.jobs_to_store(now=300.0)) == ["later", "now"]
+
+
+def test_old_database_gets_new_columns(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "hf.db"
+    old = sqlite3.connect(path)
+    old.execute("CREATE TABLE jobs (request_id TEXT PRIMARY KEY, status TEXT, stored INTEGER NOT NULL DEFAULT 0)")
+    old.execute("INSERT INTO jobs (request_id, status) VALUES ('r1', 'completed')")
+    old.commit()
+    old.close()
+    store = JobStore(path)
+    assert store.upsert_job("r1", download_attempts=1)["download_attempts"] == 1

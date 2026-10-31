@@ -31,6 +31,17 @@ WEBHOOK_PATH = "/webhooks/higgsfield"
 POLL_INTERVAL = 5
 # Longest time one /v1/jobs/<id>?wait=... request is held open (the client simply asks again).
 MAX_WAIT = 60
+# Failed downloads are retried after 60 s, 120 s, 240 s ... (at most 1 hour apart) until Higgsfield
+# deletes the files (expires_at), or MAX_DOWNLOAD_ATTEMPTS times if expires_at is unknown.
+DOWNLOAD_RETRY_START = 60
+DOWNLOAD_RETRY_MAX = 3600
+MAX_DOWNLOAD_ATTEMPTS = 12
+# Request bodies are small JSON; anything bigger is refused before it is read (also protects the public webhook).
+MAX_BODY = 1_000_000
+# Seconds a client may take to send its request (stops very slow or stuck connections from piling up).
+SOCKET_TIMEOUT = 30
+# How long a request waits for a parallel request with the same Idempotency-Key to finish.
+SUBMIT_WAIT = 180
 # Higgsfield paths that are passed on unchanged (with the server's credentials).
 FORWARD_PREFIXES = ("/requests/", "/estimate/", "/files/", "/v1/custom-references/")
 
@@ -100,6 +111,13 @@ def load_server_config(environ: Mapping[str, str]) -> ServerConfig:
         raise config_error("Set both HF_PUBLIC_URL and HF_WEBHOOK_SECRET for webhooks, or neither for polling.")
     if public_url and not public_url.startswith("https://"):
         raise config_error("HF_PUBLIC_URL must start with https:// (Higgsfield only calls HTTPS webhooks).")
+    if webhook_secret:
+        try:
+            webhooks.signing_key(webhook_secret)
+        except webhooks.WebhookError:
+            raise config_error(
+                "HF_WEBHOOK_SECRET is not a valid whsec_ secret – copy it again from the Console."
+            ) from None
     max_usd = environ.get("HF_MAX_USD")
     webhook_listen = environ.get("HF_WEBHOOK_LISTEN")
     return ServerConfig(
@@ -238,6 +256,9 @@ class HfServer:
         self.files_dir = config.data_dir / "files"
         self.api_address: tuple[str, int] | None = None
         self.webhook_address: tuple[str, int] | None = None
+        # Idempotency-Keys of submissions in progress, so a parallel retry waits instead of paying twice.
+        self.submitting: dict[str, threading.Event] = {}
+        self.submitting_lock = threading.Lock()
         self._servers: list[ThreadingHTTPServer] = []
         self._threads: list[threading.Thread] = []
         self._stopping = False
@@ -307,17 +328,19 @@ class HfServer:
         while not self._stopping:
             try:
                 self.run_worker_once()
-            except Exception as error:  # the worker must never die; log and try again
+            except Exception as error:  # the worker must never die; log, pause and try again
                 log_event("worker_error", error=f"{type(error).__name__}: {error}")
-            # Sleep until there is something to download, or 2 seconds at most.
-            self.store.wait_until(lambda: self._stopping or bool(self.store.jobs_to_store()), 2)
+                self.store.wait_until(lambda: self._stopping, 2)
+                continue
+            # Sleep until a download is due, or 2 seconds at most.
+            self.store.wait_until(lambda: self._stopping or bool(self.store.jobs_to_store(self.clock())), 2)
 
     def run_worker_once(self) -> None:
         """One round: poll jobs that are due, then download finished results."""
         for job in self.store.open_jobs():
             if job["kind"] != "training" and self.poll_due(job):
                 self.poll(job)
-        for job in self.store.jobs_to_store():
+        for job in self.store.jobs_to_store(self.clock()):
             self.store_files(job)
 
     def poll_due(self, job: dict) -> bool:
@@ -350,16 +373,43 @@ class HfServer:
 
     def store_files(self, job: dict) -> None:
         request_id = job["request_id"]
+        if not hf.extract_outputs(job["result"] or {}):
+            # No file URLs (e.g. a webhook without payload): ask Higgsfield for the full status once.
+            self.poll(job)
+            job = self.store.get_job(request_id)
         day = (job["submitted"] or self.now_iso())[:10]
         try:
             paths = hf.download_outputs(job["result"] or {"request_id": request_id}, job, self.files_dir / day)
-        except CliError as error:
-            self.store.upsert_job(request_id, download_error=str(error))
-            log_event("download_failed", request_id=request_id, error=str(error))
+        except (CliError, requests.RequestException, OSError) as error:
+            self.download_failed(job, error)
             return
         files = [str(path.relative_to(self.files_dir)) for path in paths]
         self.store.upsert_job(request_id, stored=True, files=files)
         log_event("stored", request_id=request_id, files=files)
+
+    def download_failed(self, job: dict, error: Exception) -> None:
+        """Schedules another try with a growing pause – or gives up once Higgsfield has deleted the files."""
+        attempts = (job["download_attempts"] or 0) + 1
+        now = self.clock()
+        delay = min(DOWNLOAD_RETRY_START * 2 ** (attempts - 1), DOWNLOAD_RETRY_MAX)
+        expires = parse_time(job["expires_at"])
+        give_up = now + delay >= expires if expires is not None else attempts >= MAX_DOWNLOAD_ATTEMPTS
+        message = str(error) if isinstance(error, CliError) else f"{type(error).__name__}: {error}"
+        if give_up:
+            self.store.upsert_job(job["request_id"], download_attempts=attempts, download_error=message)
+        else:
+            self.store.upsert_job(job["request_id"], download_attempts=attempts, next_download=now + delay)
+        log_event("download_failed", request_id=job["request_id"], error=message, attempts=attempts, gave_up=give_up)
+
+
+def parse_time(value: str | None) -> float | None:
+    """'2026-11-07T12:00:00Z' -> seconds since 1970, or None. ("Z" is replaced for Python 3.10.)"""
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
 
 
 # --- HTTP handlers ----------------------------------------------------------
@@ -382,6 +432,8 @@ def make_handler(app: HfServer, webhook_only: bool, allow_webhook: bool) -> type
 
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
+        # Socket timeout for reading a request: slow or stuck clients are disconnected.
+        timeout = SOCKET_TIMEOUT
 
         def log_message(self, format, *args):  # noqa: A002 – name given by http.server
             pass  # silence the default access log; we log our own events
@@ -418,6 +470,10 @@ def make_handler(app: HfServer, webhook_only: bool, allow_webhook: bool) -> type
                 self.send_json(error.status, {"detail": str(error)})
             except CliError as error:
                 self.send_json(error.status_code or 502, {"detail": hf_detail(error)})
+            except Exception as error:  # anything unexpected: answer instead of dropping the connection
+                log_event("request_error", path=path, error=f"{type(error).__name__}: {error}")
+                self.close_connection = True
+                self.send_json(500, {"detail": f"Internal error ({type(error).__name__}: {error})."})
 
         def check_token(self) -> None:
             given = self.headers.get("Authorization", "")
@@ -426,7 +482,14 @@ def make_handler(app: HfServer, webhook_only: bool, allow_webhook: bool) -> type
                 raise HttpError(401, "Missing or wrong HF_SERVER_TOKEN.")
 
         def body_bytes(self) -> bytes:
-            length = int(self.headers.get("Content-Length") or 0)
+            text = self.headers.get("Content-Length") or "0"
+            if not text.isdigit():
+                self.close_connection = True  # the unread body would confuse the next request
+                raise HttpError(400, "Invalid Content-Length.")
+            length = int(text)
+            if length > MAX_BODY:
+                self.close_connection = True
+                raise HttpError(413, f"Body too large (limit {MAX_BODY} bytes).")
             return self.rfile.read(length) if length else b""
 
         def body_json(self) -> dict:
@@ -471,11 +534,31 @@ def make_handler(app: HfServer, webhook_only: bool, allow_webhook: bool) -> type
         def on_generation(self, model: str) -> None:
             body = self.body_json()
             key = self.headers.get("Idempotency-Key")
-            existing = app.store.find_by_idempotency_key(key) if key else None
+            if not key:
+                self.submit_generation(model, body, None)
+                return
+            with app.submitting_lock:
+                existing = app.store.find_by_idempotency_key(key)
+                running = app.submitting.get(key)
+                if not existing and not running:
+                    # This request submits; a parallel retry with the same key will wait for it.
+                    app.submitting[key] = threading.Event()
+            if not existing and running:
+                running.wait(SUBMIT_WAIT)
+                existing = app.store.find_by_idempotency_key(key)
+                if not existing:
+                    raise HttpError(409, "A request with this Idempotency-Key is still being submitted. Try again.")
             if existing:
                 # A retry of a job we already submitted: answer from the store, do not pay twice.
                 self.send_json(200, {"request_id": existing["request_id"], "status": existing["status"]})
                 return
+            try:
+                self.submit_generation(model, body, key)
+            finally:
+                with app.submitting_lock:
+                    app.submitting.pop(key).set()
+
+        def submit_generation(self, model: str, body: dict, key: str | None) -> None:
             cost = app.estimate(model, body)
             refusal = budget_refusal(cost, app.config.max_usd, model, app.config.allow_unpriced)
             if refusal:
