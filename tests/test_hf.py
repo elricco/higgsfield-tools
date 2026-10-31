@@ -11,46 +11,9 @@ from pathlib import Path
 
 import pytest
 import requests
+from fakes import FakeResponse, FakeSession
 
 import hf
-
-# --- Helper classes ---------------------------------------------------------
-
-
-class FakeResponse:
-    """Imitates the parts of requests.Response that hf.py uses."""
-
-    def __init__(self, status_code: int, body=None, headers: dict | None = None):
-        self.status_code = status_code
-        self._body = body
-        self.headers = headers or {}
-        self.text = json.dumps(body) if body is not None else ""
-        self.content = self.text.encode()
-        self.reason = "Fake"
-
-    def json(self):
-        if self._body is None:
-            raise ValueError("no JSON")
-        return self._body
-
-
-class FakeSession:
-    """Returns the prepared responses one after another and records every call.
-
-    An entry can also be an exception – then it is raised.
-    """
-
-    def __init__(self, responses: list):
-        self.responses = list(responses)
-        self.calls = []
-
-    def request(self, method, url, json=None, headers=None, timeout=None):
-        self.calls.append({"method": method, "url": url, "json": json, "headers": headers, "timeout": timeout})
-        response = self.responses.pop(0)
-        if isinstance(response, Exception):
-            raise response
-        return response
-
 
 # --- Fixtures ---------------------------------------------------------------
 # A fixture is a function whose return value pytest automatically passes to
@@ -1169,3 +1132,47 @@ def test_batch_runs_all_jobs(sleeps, no_env_file, no_max_usd, models_file, tmp_p
 def test_example_batch_file_is_valid():
     jobs = hf.read_batch_file(hf.PROJECT_DIR / "examples" / "batch.jsonl", None)
     assert len(jobs) == 3
+
+
+# --- Shared helpers for server and client mode ------------------------------
+
+
+def test_api_request_error_carries_status_code(sleeps):
+    session = FakeSession([FakeResponse(403, {"detail": "nope"})])
+    with pytest.raises(hf.CliError, match="HTTP 403: nope") as info:
+        hf.api_request(session, "POST", "/x")
+    assert info.value.status_code == 403
+
+
+def test_summarize_spend_matches_cmd_spend():
+    today = date.today().isoformat()
+    jobs = [
+        {"model": "a/b"},
+        {"model": "img", "usd": 0.004, "status": "completed", "submitted": f"{today}T09:00:00"},
+        {"model": "vid", "usd": 0.4, "status": "completed", "submitted": f"{today}T10:00:00"},
+        {"model": "vid", "usd": 0.4, "status": "failed", "submitted": f"{today}T11:00:00"},
+        {"model": "vid", "usd": 0.4, "status": "in_progress", "submitted": f"{today}T12:00:00"},
+        {"model": "img", "usd": 1.0, "status": "completed", "submitted": "2020-01-01T09:00:00"},
+    ]
+    assert hf.summarize_spend(jobs, today) == {
+        "estimated_usd": 0.404,
+        "by_model": {"vid": 0.4, "img": 0.004},
+        "jobs": 2,
+        "running": 1,
+        "not_charged": 1,
+        "price_unknown": 0,
+        "untracked": 1,
+    }
+
+
+def test_download_outputs_does_not_touch_job_log(tmp_path, monkeypatch):
+    monkeypatch.setattr(hf, "download_file", lambda url, target: target.write_bytes(b"IMG"))
+    job = {"model": "a/b", "prompt": "a lake", "payload": {"prompt": "a lake"}, "usd": 0.004}
+    result = {"request_id": "r1", "images": [{"url": "https://cdn/x.png"}]}
+
+    paths = hf.download_outputs(result, job, tmp_path / "out")
+
+    image = tmp_path / "out" / f"{date.today():%Y-%m-%d}_a-b_r1.png"
+    assert paths == [image]
+    assert image.with_suffix(".json").exists()
+    assert hf.load_history() == {}

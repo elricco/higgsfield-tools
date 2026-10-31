@@ -17,6 +17,7 @@ import time
 import traceback
 import uuid
 import webbrowser
+from collections.abc import Iterable
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlparse
@@ -102,9 +103,11 @@ FALLBACK_EXTENSIONS = {"images": ".jpg", "video": ".mp4", "audio": ".mp3", "audi
 class CliError(Exception):
     """An expected error: printed as a short message, without a stack trace."""
 
-    def __init__(self, message: str, exit_code: int = 1):
+    def __init__(self, message: str, exit_code: int = 1, status_code: int | None = None):
         super().__init__(message)
         self.exit_code = exit_code
+        # The HTTP status of a failed API call, so the server can pass it on unchanged.
+        self.status_code = status_code
 
 
 def print_json(data: dict) -> None:
@@ -308,6 +311,11 @@ def describe_error(response: requests.Response) -> str:
     return str(detail).lstrip(": ")
 
 
+def api_base_url() -> str:
+    """Where API calls go: Higgsfield itself (later also an hf server in client mode)."""
+    return BASE_URL
+
+
 def api_request(
     session: requests.Session,
     method: str,
@@ -321,7 +329,7 @@ def api_request(
     - New attempts on network errors, 429 and 5xx (with backoff).
     - No new attempts on other 4xx – something is wrong with the request.
     """
-    url = path if path.startswith("http") else BASE_URL + path
+    url = path if path.startswith("http") else api_base_url() + path
     for attempt in range(1, MAX_ATTEMPTS + 1):
         is_last_attempt = attempt == MAX_ATTEMPTS
         try:
@@ -337,7 +345,7 @@ def api_request(
             continue
 
         if response.status_code >= 400:
-            raise CliError(f"HTTP {response.status_code}: {describe_error(response)}")
+            raise CliError(f"HTTP {response.status_code}: {describe_error(response)}", status_code=response.status_code)
 
         # Some responses (e.g. cancel) have no content.
         return response.json() if response.content else {}
@@ -693,8 +701,8 @@ def sidecar_data(request_id: str, job: dict, file_name: str) -> dict:
     }
 
 
-def save_outputs(result: dict, job: dict, out_dir: Path) -> list[str]:
-    """Downloads all results, writes a .json sidecar per file and returns the file paths."""
+def download_outputs(result: dict, job: dict, out_dir: Path) -> list[Path]:
+    """Downloads all results and writes a .json sidecar per file. Does not touch the job log."""
     outputs = extract_outputs(result)
     if not outputs:
         raise CliError("The response contains no result files.")
@@ -709,10 +717,16 @@ def save_outputs(result: dict, job: dict, out_dir: Path) -> list[str]:
         download_file(url, target)
         # with_suffix swaps the extension: x.png -> x.json
         write_json_file(target.with_suffix(".json"), sidecar_data(request_id, job, name))
-        paths.append(str(target))
-    # resolve() gives the absolute path, so the log works from any folder.
-    update_job(request_id, status="completed", files=[str(Path(path).resolve()) for path in paths])
+        paths.append(target)
     return paths
+
+
+def save_outputs(result: dict, job: dict, out_dir: Path) -> list[str]:
+    """Downloads all results with sidecars, records them in the job log and returns the file paths."""
+    paths = download_outputs(result, job, out_dir)
+    # resolve() gives the absolute path, so the log works from any folder.
+    update_job(result["request_id"], status="completed", files=[str(path.resolve()) for path in paths])
+    return [str(path) for path in paths]
 
 
 # --- Commands ---------------------------------------------------------------
@@ -1052,14 +1066,17 @@ def cmd_batch(args: argparse.Namespace) -> dict:
     return {"jobs": entries, **summarize_many(entries)}
 
 
-def cmd_spend(args: argparse.Namespace) -> dict:
-    """Adds up the estimated costs of finished jobs from the job log."""
-    # --days 1 means today, --days 7 the last seven days including today.
-    since = (date.today() - timedelta(days=args.days - 1)).isoformat() if args.days else None
+def spend_since(days: int | None) -> str | None:
+    """The first day to count: --days 1 means today, --days 7 the last seven days including today."""
+    return (date.today() - timedelta(days=days - 1)).isoformat() if days else None
+
+
+def summarize_spend(jobs: Iterable[dict], since: str | None) -> dict:
+    """Adds up the estimated costs of finished jobs (from the local log or the server's store)."""
     total = 0.0
     by_model = {}
     counts = {"jobs": 0, "running": 0, "not_charged": 0, "price_unknown": 0, "untracked": 0}
-    for job in load_history().values():
+    for job in jobs:
         if job.get("kind") == "local":
             continue  # e.g. concat: made on this machine, nothing was paid
         submitted = job.get("submitted")
@@ -1082,12 +1099,16 @@ def cmd_spend(args: argparse.Namespace) -> dict:
             total += job["usd"]
             by_model[job["model"]] = by_model.get(job["model"], 0) + job["usd"]
     return {
-        "since": since or "all",
         "estimated_usd": round(total, 3),
         # Most expensive models first.
         "by_model": {model: round(usd, 3) for model, usd in sorted(by_model.items(), key=lambda item: -item[1])},
         **counts,
     }
+
+
+def cmd_spend(args: argparse.Namespace) -> dict:
+    since = spend_since(args.days)
+    return {"since": since or "all", **summarize_spend(load_history().values(), since)}
 
 
 def gallery_items() -> tuple[list[dict], int]:
