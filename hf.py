@@ -712,7 +712,7 @@ def download_outputs(result: dict, job: dict, out_dir: Path) -> list[Path]:
     paths = []
     # enumerate(..., start=1) yields number and element: (1, a), (2, b), ...
     for index, (field, url) in enumerate(outputs, start=1):
-        name = output_filename(job.get("model", "unknown"), request_id, field, url, index, len(outputs), date.today())
+        name = output_filename(job.get("model") or "unknown", request_id, field, url, index, len(outputs), date.today())
         target = out_dir / name
         download_file(url, target)
         # with_suffix swaps the extension: x.png -> x.json

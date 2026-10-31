@@ -1176,3 +1176,11 @@ def test_download_outputs_does_not_touch_job_log(tmp_path, monkeypatch):
     assert paths == [image]
     assert image.with_suffix(".json").exists()
     assert hf.load_history() == {}
+
+
+def test_download_outputs_with_unknown_model(tmp_path, monkeypatch):
+    # A job known only from a webhook has model None – the file name falls back to "unknown".
+    monkeypatch.setattr(hf, "download_file", lambda url, target: target.write_bytes(b"IMG"))
+    result = {"request_id": "r1", "images": [{"url": "https://cdn/x.png"}]}
+    (path,) = hf.download_outputs(result, {"model": None}, tmp_path)
+    assert path.name == f"{date.today():%Y-%m-%d}_unknown_r1.png"
