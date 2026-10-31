@@ -146,6 +146,18 @@ Exit codes: `0` ok, `1` error or failed job, `2` missing credentials.
 
 The data files always live in the repo, regardless of the directory `hf` is called from.
 
+## Planning documents
+
+Design specs and implementation plans live on the separate branch `planning`, which is never merged into
+`main`. Locally it is mounted as the folder `planning/` (ignored by `main`):
+
+```bash
+git fetch origin planning:planning     # after a fresh clone, if the branch was pushed
+git worktree add planning planning     # mount it as ./planning
+```
+
+Commit and push changes to it from inside `planning/` (`git push origin planning`).
+
 ## Tests
 
 ```bash

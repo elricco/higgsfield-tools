@@ -148,6 +148,18 @@ Exit-Codes: `0` ok, `1` Fehler bzw. Job fehlgeschlagen, `2` Zugangsdaten fehlen.
 
 Die Datendateien liegen immer im Repo, egal aus welchem Ordner `hf` aufgerufen wird.
 
+## Planungsdokumente
+
+Entwürfe (Specs) und Umsetzungspläne liegen im separaten Branch `planning`, der nie in `main` gemergt wird.
+Lokal ist er als Ordner `planning/` eingehängt (`main` ignoriert ihn):
+
+```bash
+git fetch origin planning:planning     # nach einem frischen Clone, falls der Branch gepusht wurde
+git worktree add planning planning     # als ./planning einhängen
+```
+
+Änderungen daran in `planning/` committen und pushen (`git push origin planning`).
+
 ## Tests
 
 ```bash

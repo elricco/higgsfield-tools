@@ -27,3 +27,6 @@ build/
 
 # Original project brief (kept local)
 higgsfield-claude-code-prompt.md
+
+# Specs and plans live on the separate "planning" branch, mounted here as a worktree
+planning/
