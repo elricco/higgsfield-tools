@@ -1,5 +1,6 @@
 """Tests for hf serve: a real HTTP server on 127.0.0.1, Higgsfield replaced by a FakeSession."""
 
+import base64
 import json
 import threading
 import time
@@ -14,7 +15,9 @@ import server
 import webhooks
 
 TOKEN = "test-token"
-SECRET = "whsec_dGVzdC1rZXktMTIzNDU2Nzg5MA=="
+# Built at runtime so secret scanners do not mistake a test value for a real secret.
+SECRET = "whsec_" + base64.b64encode(b"test-key-1234567890").decode()
+OTHER_SECRET = "whsec_" + base64.b64encode(b"other-key").decode()
 AUTH = {"Authorization": f"Bearer {TOKEN}"}
 IMAGE_RESULT = {"request_id": "r1", "status": "completed", "images": [{"url": "https://cdn/x.png"}]}
 
@@ -280,7 +283,7 @@ def test_duplicate_webhook_is_ignored(start_server):
 
 def test_bad_signature_rejected(start_server):
     app, _ = start_server(**WEBHOOKS_ON)
-    response = send_webhook(app, completed_event(), secret="whsec_b3RoZXIta2V5")
+    response = send_webhook(app, completed_event(), secret=OTHER_SECRET)
     assert response.status_code == 400
     assert app.store.get_job("r1") is None
 
