@@ -20,7 +20,7 @@ import webbrowser
 from collections.abc import Iterable
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import requests
 
@@ -206,7 +206,10 @@ def update_job(request_id: str, **fields) -> dict:
 
     **fields collects all keyword arguments in a dictionary:
     update_job("r1", status="completed") gives fields == {"status": "completed"}.
+    In client mode the server keeps the job log, so nothing is written locally.
     """
+    if client_settings():
+        return {"request_id": request_id, **fields}
     history = load_history()
     job = {**history.get(request_id, {}), **fields}
     history[request_id] = job
@@ -273,9 +276,16 @@ def build_payload(args: argparse.Namespace) -> dict:
 
 
 def make_session() -> requests.Session:
-    """Creates a session that sends the auth header with every call."""
-    key, secret = load_credentials()
+    """Creates a session that sends the auth header with every call.
+
+    In client mode the server token is sent instead; the Higgsfield keys stay on the server.
+    """
     session = requests.Session()
+    settings = client_settings()
+    if settings:
+        session.headers["Authorization"] = f"Bearer {settings[1]}"
+        return session
+    key, secret = load_credentials()
     session.headers["Authorization"] = f"Key {key}:{secret}"
     return session
 
@@ -311,9 +321,21 @@ def describe_error(response: requests.Response) -> str:
     return str(detail).lstrip(": ")
 
 
+def client_settings() -> tuple[str, str] | None:
+    """(server URL, token) when HF_SERVER is set (client mode), otherwise None (local mode)."""
+    server_url = os.environ.get("HF_SERVER")
+    if not server_url:
+        return None
+    token = os.environ.get("HF_SERVER_TOKEN")
+    if not token:
+        raise CliError("HF_SERVER is set, but HF_SERVER_TOKEN is missing.", exit_code=2)
+    return server_url.rstrip("/"), token
+
+
 def api_base_url() -> str:
-    """Where API calls go: Higgsfield itself (later also an hf server in client mode)."""
-    return BASE_URL
+    """Where API calls go: Higgsfield itself, or the hf server in client mode."""
+    settings = client_settings()
+    return settings[0] if settings else BASE_URL
 
 
 def api_request(
@@ -445,7 +467,14 @@ def find_video(value: str) -> Path:
     path = Path(value).expanduser()
     if path.is_file():
         return path
-    job = load_history().get(value)
+    if client_settings():
+        # In client mode the results live on the server: fetch them into ./outputs first.
+        session = make_session()
+        record = api_request(session, "GET", f"/v1/jobs/{value}")
+        files = fetch_outputs(session, record, {}, Path("outputs"))
+        job = {"files": [str(Path(file).resolve()) for file in files]}
+    else:
+        job = load_history().get(value)
     if job is None:
         raise CliError(f"Video not found: {value}")
     for file in job.get("files", []):
@@ -517,6 +546,8 @@ def cmd_concat(args: argparse.Namespace) -> dict:
 
 
 def load_characters() -> dict:
+    if client_settings():
+        return api_request(make_session(), "GET", "/v1/characters")["characters"]
     return read_json_file(CHARACTERS_FILE, {})
 
 
@@ -529,6 +560,10 @@ def find_character(name_or_id: str) -> dict:
 
 
 def save_character(name: str, data: dict) -> None:
+    if client_settings():
+        # quote() makes the name safe inside a URL path (spaces become %20).
+        api_request(make_session(), "PUT", f"/v1/characters/{quote(name, safe='')}", json_body=data)
+        return
     characters = load_characters()
     # Keep existing fields, overwrite them with the new ones.
     characters[name] = {**characters.get(name, {}), **data}
@@ -729,6 +764,65 @@ def save_outputs(result: dict, job: dict, out_dir: Path) -> list[str]:
     return [str(path) for path in paths]
 
 
+def is_settled(record: dict) -> bool:
+    """A server job record will not change any more: finished and stored (or cannot be)."""
+    if record.get("status") not in TERMINAL_STATUSES:
+        return False
+    return bool(record.get("stored") or record.get("status") != "completed" or record.get("download_error"))
+
+
+def wait_for_job(session: requests.Session, request_id: str, timeout: int) -> dict:
+    """Waits until a job is finished. Locally by polling Higgsfield, in client mode by asking the server."""
+    if not client_settings():
+        result = poll_until_done(session, request_id, timeout)
+        record_status(result)
+        return result
+    deadline = time.monotonic() + timeout
+    while True:
+        remaining = deadline - time.monotonic()
+        # The server holds each request until the job is done, at most "wait" seconds.
+        # 25 s stays below HTTP_TIMEOUT, so the request itself never times out.
+        wait = max(1, min(25, int(remaining)))
+        record = api_request(session, "GET", f"/v1/jobs/{request_id}?wait={wait}")
+        if is_settled(record):
+            return record
+        if time.monotonic() >= deadline:
+            raise CliError(
+                f"Timeout after {timeout} s, job {request_id} is still running "
+                f"(status '{record.get('status')}'). Continue later with 'wait'."
+            )
+
+
+def download_server_file(session: requests.Session, rel: str, target: Path) -> None:
+    """Downloads one stored file from the hf server (with the server token)."""
+    url = f"{api_base_url()}/v1/files/{quote(rel)}"
+    with session.get(url, stream=True, timeout=HTTP_TIMEOUT) as response:
+        if response.status_code >= 400:
+            raise CliError(f"Download from the server failed: HTTP {response.status_code}")
+        with target.open("wb") as file:
+            for chunk in response.iter_content(chunk_size=1024 * 1024):
+                file.write(chunk)
+
+
+def fetch_outputs(session: requests.Session, result: dict, job: dict, out_dir: Path) -> list[str]:
+    """Puts the result files into out_dir: from Higgsfield locally, from the server in client mode."""
+    if not client_settings():
+        return save_outputs(result, job, out_dir)
+    if result.get("download_error"):
+        raise CliError(f"The server could not store the result: {result['download_error']}")
+    if not result.get("stored") or not result.get("files"):
+        raise CliError(f"The server has not stored job {result.get('request_id')} yet. Try again shortly.")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    paths = []
+    for rel in result["files"]:
+        target = out_dir / Path(rel).name
+        download_server_file(session, rel, target)
+        # The sidecar has the same name with .json (written by the server).
+        download_server_file(session, str(Path(rel).with_suffix(".json")), target.with_suffix(".json"))
+        paths.append(str(target))
+    return paths
+
+
 # --- Commands ---------------------------------------------------------------
 # Every function receives the parsed arguments (args) and returns a dictionary.
 # main() takes care of the output.
@@ -874,20 +968,24 @@ def cmd_cancel(args: argparse.Namespace) -> dict:
 
 
 def cmd_wait(args: argparse.Namespace) -> dict:
-    result = poll_until_done(make_session(), args.request_id, args.timeout)
-    record_status(result)
+    result = wait_for_job(make_session(), args.request_id, args.timeout)
     return result if args.verbose else compact_status(result)
 
 
 def cmd_download(args: argparse.Namespace) -> dict:
-    result = api_request(make_session(), "GET", f"/requests/{args.request_id}/status")
-    record_status(result)
+    session = make_session()
+    if client_settings():
+        # Give the server a few seconds to finish storing a job that just completed.
+        result = api_request(session, "GET", f"/v1/jobs/{args.request_id}?wait=10")
+    else:
+        result = api_request(session, "GET", f"/requests/{args.request_id}/status")
+        record_status(result)
     if result.get("status") != "completed":
         output = compact_status(result)
         output.setdefault("error", f"Job is not finished yet (status '{result.get('status')}').")
         return output
     job = load_history().get(args.request_id, {})
-    files = save_outputs(result, job, args.out)
+    files = fetch_outputs(session, result, job, args.out)
     refresh_gallery(args.open)
     return {"request_id": args.request_id, "status": "completed", "files": files}
 
@@ -895,12 +993,11 @@ def cmd_download(args: argparse.Namespace) -> dict:
 def cmd_run(args: argparse.Namespace) -> dict:
     session = make_session()
     submitted = submit_generation(session, args)
-    result = poll_until_done(session, submitted["request_id"], args.timeout)
-    record_status(result)
+    result = wait_for_job(session, submitted["request_id"], args.timeout)
     if result.get("status") != "completed":
         return compact_status(result)
     job = load_history().get(result["request_id"], {})
-    files = save_outputs(result, job, args.out)
+    files = fetch_outputs(session, result, job, args.out)
     refresh_gallery(args.open)
     return {"request_id": result["request_id"], "status": "completed", "files": files, "usd": submitted["usd"]}
 
@@ -939,11 +1036,10 @@ def run_many(session: requests.Session, jobs: list[dict], timeout: int, out_dir:
         if "error" in entry:
             continue
         try:
-            result = poll_until_done(session, entry["request_id"], timeout)
-            record_status(result)
+            result = wait_for_job(session, entry["request_id"], timeout)
             entry["status"] = result.get("status")
             if entry["status"] == "completed":
-                entry["files"] = save_outputs(result, load_history().get(entry["request_id"], {}), out_dir)
+                entry["files"] = fetch_outputs(session, result, load_history().get(entry["request_id"], {}), out_dir)
             else:
                 entry["error"] = compact_status(result)["error"]
         except CliError as error:
@@ -1107,6 +1203,9 @@ def summarize_spend(jobs: Iterable[dict], since: str | None) -> dict:
 
 
 def cmd_spend(args: argparse.Namespace) -> dict:
+    if client_settings():
+        query = f"?days={args.days}" if args.days else ""
+        return api_request(make_session(), "GET", f"/v1/spend{query}")
     since = spend_since(args.days)
     return {"since": since or "all", **summarize_spend(load_history().values(), since)}
 
@@ -1146,6 +1245,8 @@ def write_gallery() -> dict:
 
 def refresh_gallery(open_browser: bool = False) -> None:
     """Rebuilds the gallery after a download. A gallery problem must never fail the job itself."""
+    if client_settings():
+        return  # the job log is on the server; a served gallery is planned for later
     try:
         write_gallery()
     except OSError:
@@ -1184,6 +1285,8 @@ def cmd_serve(args: argparse.Namespace) -> dict:
 
 
 def cmd_gallery(args: argparse.Namespace) -> dict:
+    if client_settings():
+        raise CliError("The gallery is not available in client mode yet (planned as a page of the server).")
     added = scan_for_results(args.scan) if args.scan else None
     output = write_gallery()
     if added is not None:
@@ -1279,8 +1382,33 @@ def check_docs() -> str:
     return "ok"
 
 
+def check_server() -> dict:
+    """Checks in client mode: is the hf server reachable, is the token right, which mode does it run in?"""
+    server_url, _ = client_settings()
+    checks = {"mode": "client"}
+    try:
+        requests.get(f"{server_url}/healthz", timeout=10).raise_for_status()
+        status = api_request(make_session(), "GET", "/v1/status")
+    except requests.RequestException as error:
+        checks["server"] = f"unreachable ({type(error).__name__}) – is HF_SERVER right and the server running?"
+        return checks
+    except CliError as error:
+        checks["server"] = str(error)
+        return checks
+    checks["server"] = "ok"
+    checks["webhooks"] = "on" if status.get("webhooks") else "off (polling)"
+    checks["server_version"] = status.get("version")
+    return checks
+
+
 def cmd_doctor(args: argparse.Namespace) -> dict:
-    checks = {}
+    if client_settings():
+        checks = check_server()
+        output = {"checks": checks}
+        if checks["server"] != "ok":
+            output["error"] = "Problem with: server"
+        return output
+    checks = {"mode": "local"}
     try:
         load_credentials()
         checks["credentials"] = "ok"

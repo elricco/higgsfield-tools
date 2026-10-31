@@ -33,6 +33,12 @@ def history_file(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def local_mode(monkeypatch):
+    """These tests are about local mode, even if HF_SERVER is set in the developer's shell."""
+    monkeypatch.delenv("HF_SERVER", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def browser_calls(monkeypatch):
     """Runs automatically: no test opens a real browser; the URLs are recorded instead."""
     calls = []
