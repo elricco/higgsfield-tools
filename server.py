@@ -9,6 +9,7 @@ import hmac
 import importlib.metadata
 import json
 import mimetypes
+import signal
 import threading
 import time
 from collections.abc import Callable, Mapping
@@ -623,3 +624,33 @@ def hf_detail(error: CliError) -> str:
     if error.status_code and text.startswith(f"HTTP {error.status_code}: "):
         return text.removeprefix(f"HTTP {error.status_code}: ")
     return text
+
+
+# --- Entry point ------------------------------------------------------------
+
+
+def describe_address(address: tuple[str, int] | None) -> str:
+    return f"{address[0]}:{address[1]}" if address else "same port"
+
+
+def serve(config: ServerConfig) -> None:
+    """Runs the service until Ctrl+C or SIGTERM (docker stop, Kubernetes)."""
+    app = HfServer(config)
+    app.start()
+    log_event(
+        "server_started",
+        version=version(),
+        api=describe_address(app.api_address),
+        webhook=describe_address(app.webhook_address) if config.webhooks_enabled else "off",
+        mode="webhooks" if config.webhooks_enabled else "polling",
+        data_dir=str(config.data_dir),
+    )
+    stopped = threading.Event()
+    # Docker and Kubernetes stop a container with SIGTERM; we treat it like Ctrl+C.
+    signal.signal(signal.SIGTERM, lambda signum, frame: stopped.set())
+    try:
+        stopped.wait()
+    except KeyboardInterrupt:
+        pass
+    app.stop()
+    log_event("server_stopped")

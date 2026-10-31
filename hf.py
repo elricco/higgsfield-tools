@@ -1174,6 +1174,15 @@ def scan_for_results(directory: Path) -> int:
     return added
 
 
+def cmd_serve(args: argparse.Namespace) -> dict:
+    """Runs hf as a service (see docs/server.md). Only returns after it was stopped."""
+    # Imported here, not at the top: server.py itself imports hf, and local commands do not need it.
+    import server
+
+    server.serve(server.load_server_config(os.environ))
+    return {"status": "stopped"}
+
+
 def cmd_gallery(args: argparse.Namespace) -> dict:
     added = scan_for_results(args.scan) if args.scan else None
     output = write_gallery()
@@ -1470,6 +1479,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--out-file", type=Path, help="target file (default: outputs/<date>_<time>_concat.mp4)")
     p.add_argument("--open", action="store_true", help="open the gallery in the browser afterwards")
     p.set_defaults(func=cmd_concat)
+
+    p = sub.add_parser("serve", parents=[common], help="run as a service for agents (settings from the environment)")
+    p.set_defaults(func=cmd_serve)
 
     p = sub.add_parser("gallery", parents=[common], help="HTML overview of all results, opens in the browser")
     p.add_argument(

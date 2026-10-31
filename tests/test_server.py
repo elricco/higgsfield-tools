@@ -397,3 +397,34 @@ def test_jobs_list(start_server):
 def test_job_404(start_server):
     app, _ = start_server()
     assert requests.get(url(app, "/v1/jobs/nope"), headers=AUTH, timeout=5).status_code == 404
+
+
+# --- hf serve and file safety -----------------------------------------------
+
+
+def test_serve_refuses_half_webhook_config(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(hf, "ENV_FILE", tmp_path / "no.env")
+    for name, value in {"HF_API_KEY": "k", "HF_API_SECRET": "s", "HF_SERVER_TOKEN": "t"}.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv("HF_PUBLIC_URL", "https://hf.example.com")
+    monkeypatch.delenv("HF_WEBHOOK_SECRET", raising=False)
+    monkeypatch.delenv("HF_SERVER", raising=False)
+    assert hf.main(["serve"]) == 2
+    error = json.loads(capsys.readouterr().out)["error"]
+    assert "HF_PUBLIC_URL" in error and "HF_WEBHOOK_SECRET" in error
+
+
+@pytest.mark.parametrize("path", ["/v1/files/../hf.db", "/v1/files/%2e%2e/hf.db", "/v1/files/..%2fhf.db"])
+def test_file_path_traversal_is_404(start_server, path):
+    app, _ = start_server()
+    assert (app.config.data_dir / "hf.db").exists()
+    # A raw request: requests would clean up "../" itself and hide the attack.
+    import http.client
+
+    host, port = app.api_address
+    connection = http.client.HTTPConnection(host, port, timeout=5)
+    connection.request("GET", path, headers=AUTH)
+    response = connection.getresponse()
+    assert response.status == 404
+    assert b"SQLite" not in response.read()
+    connection.close()
