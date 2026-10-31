@@ -18,7 +18,7 @@ hf = "hf:main"
 
 [tool.setuptools]
 # No package folders, just single modules in the project folder.
-py-modules = ["hf", "catalog", "gallery", "webhooks", "store"]
+py-modules = ["hf", "catalog", "gallery", "webhooks", "store", "server"]
 
 # Linter and formatter: 'ruff check .' and 'ruff format .'
 [tool.ruff]
