@@ -8,7 +8,7 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       matrix:
         # The oldest supported version (requires-python) and the newest one.
@@ -29,7 +29,7 @@ jobs:
 
   # Builds the container image (without publishing it) and checks that the service starts.
   docker:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - name: Build image

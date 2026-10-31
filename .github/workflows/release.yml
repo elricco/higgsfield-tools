@@ -1,6 +1,6 @@
 # Publishes the container image to GitHub Container Registry when a version tag is pushed:
-#   git tag v0.2.0 && git push origin v0.2.0
-# Tags: 0.2.0 and 0.2 – never "latest", so deployments always pin a version.
+#   git tag v0.3.0 && git push origin v0.3.0
+# Tags: 0.3.0 and 0.3 – never "latest", so deployments always pin a version.
 name: Release image
 
 on:
@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   image:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       # QEMU + Buildx build for several CPU types (amd64 servers, arm64 e.g. Apple Silicon).

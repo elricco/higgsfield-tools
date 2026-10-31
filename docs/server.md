@@ -156,7 +156,7 @@ With a default-deny NetworkPolicy in the namespace, also allow the ingress contr
 An agent container needs the `hf` CLI, two variables and the skill text.
 
 ```dockerfile
-RUN git clone --depth 1 --branch v0.2.0 https://github.com/elricco/higgsfield-tools /opt/higgsfield-tools \
+RUN git clone --depth 1 --branch v0.3.0 https://github.com/elricco/higgsfield-tools /opt/higgsfield-tools \
  && python3 -m venv /opt/higgsfield-tools/.venv \
  && /opt/higgsfield-tools/.venv/bin/pip install -e /opt/higgsfield-tools \
  && ln -s /opt/higgsfield-tools/.venv/bin/hf /usr/local/bin/hf

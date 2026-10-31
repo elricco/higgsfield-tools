@@ -3,7 +3,7 @@
 #   docker compose -f deploy/compose.yaml up -d
 services:
   hf:
-    image: ghcr.io/elricco/higgsfield-tools:0.2.0
+    image: ghcr.io/elricco/higgsfield-tools:0.3.0
     # Or build the image from this repository instead of pulling it:
     # build: ..
     env_file: .env

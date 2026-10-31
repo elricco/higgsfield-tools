@@ -24,7 +24,7 @@ spec:
       containers:
         - name: hf
           # Pin an exact version; no "latest".
-          image: ghcr.io/elricco/higgsfield-tools:0.2.0
+          image: ghcr.io/elricco/higgsfield-tools:0.3.0
           envFrom:
             - secretRef:
                 name: hf-secrets
