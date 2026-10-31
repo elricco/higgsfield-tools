@@ -1,6 +1,6 @@
 # hf as a service – design
 
-Status: reviewed, waiting for the owner's approval · Date: 2026-10-31
+Status: approved by the owner (2026-10-31) · Date: 2026-10-31
 
 ## Intent
 
@@ -215,6 +215,7 @@ Service-specific endpoints:
 | `HF_LISTEN` | server | Address and port (default `0.0.0.0:8080`) |
 | `HF_PUBLIC_URL` | server | Public HTTPS base URL; with the secret, turns webhooks on |
 | `HF_WEBHOOK_SECRET` | server | `whsec_…` signing secret from the Higgsfield Console |
+| `HF_WEBHOOK_LISTEN` | server | Optional separate address/port only for the webhook path (e.g. `0.0.0.0:8081`). If set, the webhook is served **only** there, so exactly this port can be exposed publicly (tunnel, ingress). *(Our call, added while planning.)* |
 | `HF_FALLBACK_POLL_SECONDS` | server | Safety poll interval when webhooks are on (default 300) |
 | `HF_MAX_USD` | all | Per-job cost limit (on the server: enforced for all clients) |
 | `HF_ALLOW_UNPRICED` | server | Model IDs (comma-separated, or `*`) that may run despite an unknown price while `HF_MAX_USD` is set |
