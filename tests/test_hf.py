@@ -1239,3 +1239,96 @@ def test_download_server_file_leaves_no_partial_file(sleeps, tmp_path, monkeypat
     with pytest.raises(hf.CliError, match="Download from the server failed"):
         hf.download_server_file(FlakyGetSession(failures=99), "2026-10-31/x.png", tmp_path / "x.png")
     assert list(tmp_path.iterdir()) == []
+
+
+# --- Prompt variants {a|b} --------------------------------------------------
+
+TEMPLATE = "a {red|blue} kite over a {green|grey} hill"
+
+
+def completed(request_id: str) -> dict:
+    return {"request_id": request_id, "status": "completed", "images": [{"url": f"https://cdn/{request_id}.png"}]}
+
+
+def test_run_picks_one_variant(sleeps, models_file, no_env_file, no_max_usd, tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(hf, "download_file", lambda url, target: target.write_bytes(b"IMG"))
+    session = FakeSession([ESTIMATE_OK, SUBMIT_OK, FakeResponse(200, completed("r42"))])
+    monkeypatch.setattr(hf, "make_session", lambda: session)
+
+    code = hf.main(["run", "test/image", "--prompt", TEMPLATE, "--variant-seed", "3", "--out", str(tmp_path / "out")])
+
+    assert code == 0
+    output = json.loads(capsys.readouterr().out)
+    flower_colour, hill = output["choices"]
+    expected = f"a {flower_colour} kite over a {hill} hill"
+    # The model gets the finished prompt, never the braces.
+    assert session.calls[1]["json"]["prompt"] == expected
+    job = hf.load_history()["r42"]
+    assert (job["prompt"], job["template"], job["choices"]) == (expected, TEMPLATE, output["choices"])
+    (image,) = output["files"]
+    sidecar = json.loads(Path(image).with_suffix(".json").read_text())
+    assert (sidecar["prompt"], sidecar["template"], sidecar["choices"]) == (expected, TEMPLATE, output["choices"])
+
+
+def test_same_variant_seed_same_choices(sleeps, models_file, no_env_file, no_max_usd, monkeypatch, capsys):
+    picked = []
+    for _ in range(2):
+        monkeypatch.setattr(hf, "make_session", lambda: FakeSession([ESTIMATE_OK, SUBMIT_OK]))
+        hf.main(["submit", "test/image", "--prompt", TEMPLATE, "--variant-seed", "11"])
+        picked.append(json.loads(capsys.readouterr().out)["choices"])
+    assert picked[0] == picked[1]
+
+
+def test_plain_prompt_has_no_choices(sleeps, models_file, no_env_file, no_max_usd, monkeypatch, capsys):
+    monkeypatch.setattr(hf, "make_session", lambda: FakeSession([ESTIMATE_OK, SUBMIT_OK]))
+    hf.main(["submit", "test/image", "--prompt", "a lake"])
+    assert "choices" not in json.loads(capsys.readouterr().out)
+    assert "template" not in hf.load_history()["r42"]
+
+
+def test_run_several_variants(sleeps, models_file, no_env_file, no_max_usd, tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(hf, "download_file", lambda url, target: target.write_bytes(b"IMG"))
+    monkeypatch.setattr(
+        hf, "make_session", lambda: many_session(completed("v1"), completed("v2"), completed("v3"), usd="0.004")
+    )
+
+    code = hf.main(["run", "test/image", "--prompt", TEMPLATE, "--variants", "3", "--out", str(tmp_path / "out")])
+
+    assert code == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["usd"] == 0.012
+    assert len({tuple(job["choices"]) for job in output["jobs"]}) == 3
+    assert all(len(job["files"]) == 1 for job in output["jobs"])
+
+
+def test_variants_limit_applies_to_the_total(no_env_file, no_max_usd, models_file, monkeypatch, capsys):
+    session = FakeSession([FakeResponse(200, {"usd": "0.300"})] * 4)
+    monkeypatch.setattr(hf, "make_session", lambda: session)
+    # Each variant is below $1, all four together cost $1.20.
+    assert hf.main(["run", "test/image", "--prompt", TEMPLATE, "--variants", "all", "--max-usd", "1"]) == 1
+    assert "$1.200" in json.loads(capsys.readouterr().out)["error"]
+    assert all("/estimate/" in call["url"] for call in session.calls)
+
+
+def test_too_many_variants_is_an_error(no_env_file, models_file, capsys):
+    assert hf.main(["run", "test/image", "--prompt", TEMPLATE, "--variants", "5"]) == 1
+    assert "only 4 different combinations" in json.loads(capsys.readouterr().out)["error"]
+
+
+def test_variants_needs_placeholders(no_env_file, models_file, capsys):
+    assert hf.main(["run", "test/image", "--prompt", "a lake", "--variants", "2"]) == 1
+    assert "{a|b}" in json.loads(capsys.readouterr().out)["error"]
+
+
+def test_estimate_variants_shows_count_and_total(no_env_file, models_file, monkeypatch, capsys):
+    monkeypatch.setattr(hf, "make_session", lambda: FakeSession([FakeResponse(200, {"usd": "0.006"})]))
+    assert hf.main(["estimate", "test/image", "--prompt", TEMPLATE, "--variants", "all"]) == 0
+    output = json.loads(capsys.readouterr().out)
+    assert (output["variants"], output["usd"], output["estimated_usd"]) == (4, "0.006", 0.024)
+
+
+def test_batch_lines_pick_a_variant(tmp_path, models_file):
+    path = write_batch(tmp_path, '{"prompt": "a {red|blue} kite"}')
+    (job,) = hf.read_batch_file(path, "test/image")
+    assert job.prompt in ("a red kite", "a blue kite")
+    assert job.template == "a {red|blue} kite"

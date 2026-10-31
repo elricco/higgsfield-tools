@@ -83,6 +83,12 @@ hf run higgsfield-ai/soul/v2/standard --character Mila --prompt "..."
 hf batch examples/batch.jsonl --dry-run
 hf batch examples/batch.jsonl --max-usd 0.02
 
+# Prompt-Vorlagen: {a|b|c} wird durch eine der Optionen ersetzt
+hf run higgsfield-ai/soul/v2/standard --prompt "a {red|blue} kite over a {green|grey} hill"   # eine zufällige Variante
+hf run ... --prompt "..." --variant-seed 7          # mit derselben Zahl dieselbe Variante noch einmal
+hf estimate ... --prompt "..." --variants all       # wie viele Varianten, Gesamtpreis
+hf run ... --prompt "..." --variants 5 --max-usd 0.05   # 5 verschiedene Varianten parallel
+
 # Was hat heute gekostet?
 hf spend --days 1
 
@@ -121,10 +127,17 @@ Generierungen kennen außerdem `--image-urls A B ...` (Edit-Modelle; lokale Date
 `--character <Name>` (SOUL mit trainiertem Charakter) und `--from-last-frame <Video oder request_id>`
 (setzt einen Clip am letzten Bild fort, braucht ffmpeg).
 
+**Prompt-Vorlagen:** `{a|b|c}` in `--prompt` steht für eine der Optionen (Klammern ohne `|` bleiben normaler Text).
+`estimate`, `submit` und `run` ziehen eine zufällige Variante und geben sie als `"choices"` aus; mit
+`--variant-seed N` ist die Wahl wiederholbar. `run --variants N` erzeugt N verschiedene Varianten (`all`: alle
+Kombinationen) parallel, `estimate --variants N|all` zeigt deren Anzahl und Gesamtpreis. Job-Logbuch und
+`.json`-Sidecar speichern `template` und `choices` (im Client-Betrieb hat das Sidecar vom Server nur den fertigen Prompt).
+Auch Zeilen einer `batch`-Datei dürfen Platzhalter enthalten; jede Zeile bekommt eine zufällige Variante.
+
 `run` und `download` bauen die Galerie nach jedem Download neu; mit `--open` wird sie auch geöffnet.
 
 `submit` und `run` fragen vorher den Preis ab (kostenlos) und speichern ihn. Mit `--max-usd` oder `HF_MAX_USD` in `.env`
-schicken sie keinen Job ab, dessen Schätzung höher oder unbekannt ist. Bei `batch` und `character views` gilt `--max-usd`
+schicken sie keinen Job ab, dessen Schätzung höher oder unbekannt ist. Bei `batch`, `run --variants` und `character views` gilt `--max-usd`
 für alle Jobs zusammen, `HF_MAX_USD` weiterhin für jeden einzelnen Job.
 
 Alle Befehle kennen `--verbose` für vollständige Antworten und Stacktraces.

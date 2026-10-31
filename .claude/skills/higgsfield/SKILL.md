@@ -38,6 +38,11 @@ settings on your own. `hf gallery` is not available in client mode.
 `hf batch jobs.jsonl --dry-run` → state the total (`estimated_usd`) → after confirmation `hf batch jobs.jsonl --max-usd <total>`.
 All jobs run in parallel; one failing job does not stop the others.
 
+**Prompt templates:** if the user writes `{a|b|c}` in a prompt, pass it unchanged – `hf` picks one option per
+placeholder and reports it as `"choices"` (tell the user which variant was made). For several different variants:
+`hf estimate ... --variants N` (or `all`) → state count and `estimated_usd` → after confirmation
+`hf run ... --variants N --max-usd <total>`. `--variant-seed N` repeats a choice, e.g. to compare models.
+
 For long jobs or after an interruption: `submit` → `wait <id>` → `download <id>`; the same `request_id` is not charged twice.
 
 ## Rules

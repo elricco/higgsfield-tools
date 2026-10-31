@@ -15,7 +15,9 @@ Only read when needed. The short version is in [SKILL.md](SKILL.md).
 | `upload <file>` | `{"file", "url"}` – public URL of the uploaded file |
 | `wait <request_id> [--timeout 600]` | final status; polling 2 s → 10 s |
 | `download <request_id> [--out outputs]` | `{"request_id", "status", "files": [...]}` |
-| `run <model_id> --prompt ... [--max-usd USD] [--timeout] [--out]` | like `download` plus `"usd"` |
+| `run <model_id> --prompt ... [--max-usd USD] [--timeout] [--out]` | like `download` plus `"usd"` (and `"choices"` for a template) |
+| `run ... --variants N\|all [--max-usd TOTAL]` | `{"jobs": [{"request_id", "status", "files", "usd", "choices"}], "usd", ["error"]}` |
+| `estimate ... --variants N\|all` | `{"model", "usd" (each), "variants", "estimated_usd" (total)}` |
 | `batch <file.jsonl> [--model M] [--dry-run] [--max-usd TOTAL] [--out] [--open]` | dry run: `{"jobs": [{"model", "prompt", "usd"}], "estimated_usd"}`; otherwise `{"jobs": [{"request_id", "status", "files", "usd"}], "usd", ["error"]}` |
 | `concat <clips...> [--out-file PATH] [--open]` | `{"file", "clips"}`; joins videos (files or request_ids) with ffmpeg, free |
 | `gallery [--scan FOLDER] [--no-open]` | `{"file", "jobs", "missing_files", ["added_files"]}`; writes `gallery.html` and opens it |
@@ -34,6 +36,10 @@ Additional generation options: `--image-urls A B ...` (edit models), `--characte
 
 `--param` reads values as JSON: `duration=5` → number, `enhance_prompt=true` → bool, `aspect_ratio=16:9` → text.
 Order in the body: defaults from `models.json` → `--prompt`/`--image-url` → `--param`.
+
+Prompt templates: `{a|b|c}` in a prompt stands for one option (braces without `|` stay text). One random variant per
+`estimate`/`submit`/`run` and per batch line; `--variant-seed N` repeats a choice; `run --variants N|all` runs several
+different variants. Job log and sidecar keep `template` and `choices`.
 
 Batch lines allow the fields `model`, `prompt`, `params` (object), `image_url`, `image_urls`, `character`, `from_last_frame`.
 Empty lines and lines starting with `#` are skipped. For `batch` and `character views`, `--max-usd` limits the **total**;

@@ -81,6 +81,12 @@ hf run higgsfield-ai/soul/v2/standard --character Mila --prompt "..."
 hf batch examples/batch.jsonl --dry-run
 hf batch examples/batch.jsonl --max-usd 0.02
 
+# Prompt templates: {a|b|c} is replaced by one of the options
+hf run higgsfield-ai/soul/v2/standard --prompt "a {red|blue} kite over a {green|grey} hill"   # one random variant
+hf run ... --prompt "..." --variant-seed 7          # the same variant again with the same number
+hf estimate ... --prompt "..." --variants all       # how many variants, total price
+hf run ... --prompt "..." --variants 5 --max-usd 0.05   # 5 different variants in parallel
+
 # What did today cost?
 hf spend --days 1
 
@@ -119,10 +125,17 @@ Generation commands also accept `--image-urls A B ...` (edit models; local files
 `--character <name>` (SOUL with a trained character) and `--from-last-frame <video or request_id>`
 (continues a clip from its last frame, needs ffmpeg).
 
+**Prompt templates:** `{a|b|c}` in `--prompt` stands for one of the options (braces without `|` stay plain text).
+`estimate`, `submit` and `run` pick one variant at random and print it as `"choices"`; `--variant-seed N` makes the
+choice repeatable. `run --variants N` creates N different variants (`all`: every combination) in parallel, and
+`estimate --variants N|all` shows their number and total price. The job log and the `.json` sidecar keep the
+`template` and the `choices` (in client mode the sidecar written by the server has only the finished prompt).
+Lines in a `batch` file may use placeholders too; each line gets one random variant.
+
 `run` and `download` rebuild the gallery after every download; `--open` also opens it.
 
 `submit` and `run` ask for the price first (free) and log it. With `--max-usd`, or `HF_MAX_USD` in `.env`, they refuse
-to submit a job whose estimate is higher or unknown. For `batch` and `character views`, `--max-usd` is the limit for
+to submit a job whose estimate is higher or unknown. For `batch`, `run --variants` and `character views`, `--max-usd` is the limit for
 all jobs together, while `HF_MAX_USD` still applies to each job.
 
 All commands accept `--verbose` for full responses and stack traces.

@@ -27,6 +27,7 @@ import requests
 # Our own modules catalog.py and gallery.py (they live in the same folder).
 import catalog
 import gallery
+import variants
 
 # --- Constants --------------------------------------------------------------
 
@@ -240,6 +241,49 @@ def parse_param(text: str) -> tuple[str, object]:
     except json.JSONDecodeError:
         value = raw_value
     return key.strip(), value
+
+
+def variants_count(text: str) -> int | str:
+    """argparse type for --variants: a positive number or "all"."""
+    if text == "all":
+        return text
+    if not text.isdigit() or int(text) < 1:
+        raise argparse.ArgumentTypeError("expected a number >= 1 or 'all'")
+    return int(text)
+
+
+def expand_prompt(args: argparse.Namespace, number: int | str | None = None) -> list[argparse.Namespace]:
+    """Resolves {a|b} placeholders in --prompt: one copy of args per chosen variant.
+
+    number=None picks one at random, a number picks that many different ones, "all" every combination.
+    Each copy gets the finished prompt plus "template" and "choices", for the job log and the sidecar.
+    """
+    template = args.prompt
+    if not variants.slots(template):
+        if number is not None:
+            raise CliError("--variants needs placeholders in the prompt, e.g. 'a {red|blue} kite'. Use {a|b}.")
+        return [args]
+    # getattr with a default: batch lines have no --variant-seed.
+    rng = random.Random(getattr(args, "variant_seed", None))
+    try:
+        if number is None:
+            picked = [variants.pick(template, rng)]
+        else:
+            picked = variants.sample(template, None if number == "all" else number, rng)
+    except ValueError as error:
+        raise CliError(str(error)) from error
+    # vars(args) turns the Namespace into a dict; ** copies it into a new Namespace.
+    return [
+        argparse.Namespace(**{**vars(args), "prompt": prompt, "template": template, "choices": choices})
+        for prompt, choices in picked
+    ]
+
+
+def variant_fields(args: argparse.Namespace) -> dict:
+    """{"template": ..., "choices": [...]} if the prompt came from a template, else {}."""
+    if getattr(args, "template", None) is None:
+        return {}
+    return {"template": args.template, "choices": args.choices}
 
 
 def build_payload(args: argparse.Namespace) -> dict:
@@ -729,6 +773,7 @@ def sidecar_data(request_id: str, job: dict, file_name: str) -> dict:
         "request_id": request_id,
         "model": job.get("model"),
         "prompt": job.get("prompt"),
+        **({"template": job["template"], "choices": job.get("choices")} if job.get("template") else {}),
         "payload": job.get("payload"),
         "usd": job.get("usd"),
         "submitted": job.get("submitted"),
@@ -847,9 +892,17 @@ def fetch_outputs(session: requests.Session, result: dict, job: dict, out_dir: P
 
 
 def cmd_estimate(args: argparse.Namespace) -> dict:
-    payload = build_payload(args)
+    expanded = expand_prompt(args, args.variants)
+    # The price depends on model and parameters, not on the prompt text: one estimate is enough.
+    payload = build_payload(expanded[0])
     result = api_request(make_session(), "POST", f"/estimate/{args.model_id}", json_body=payload)
-    output = {"model": args.model_id, "usd": result.get("usd")}
+    output = {"model": args.model_id, "usd": result.get("usd"), **variant_fields(expanded[0])}
+    output.pop("template", None)
+    if args.variants is not None:
+        output.pop("choices", None)
+        output["variants"] = len(expanded)
+        usd = result.get("usd")
+        output["estimated_usd"] = round(float(usd) * len(expanded), 3) if usd is not None else None
     # Token-based models return a pricing description instead of a number.
     if result.get("pricing_description"):
         output["pricing"] = result["pricing_description"]
@@ -934,6 +987,7 @@ def submit_prepared(session: requests.Session, job: dict) -> dict:
         submitted=datetime.now().isoformat(timespec="seconds"),
         status=result.get("status"),
         **({"from_last_frame": args.from_last_frame} if args.from_last_frame else {}),
+        **variant_fields(args),
     )
     return {**result, "usd": cost["usd"]}
 
@@ -954,8 +1008,10 @@ def submit_generation(session: requests.Session, args: argparse.Namespace) -> di
 
 
 def cmd_submit(args: argparse.Namespace) -> dict:
+    (args,) = expand_prompt(args)
     result = submit_generation(make_session(), args)
-    return result if args.verbose else {**compact_status(result), "usd": result["usd"]}
+    choices = {"choices": args.choices} if variant_fields(args) else {}
+    return result if args.verbose else {**compact_status(result), "usd": result["usd"], **choices}
 
 
 def cmd_status(args: argparse.Namespace) -> dict:
@@ -1009,15 +1065,39 @@ def cmd_download(args: argparse.Namespace) -> dict:
 
 
 def cmd_run(args: argparse.Namespace) -> dict:
+    if args.variants is not None:
+        return run_variants(args)
+    (args,) = expand_prompt(args)
+    choices = {"choices": args.choices} if variant_fields(args) else {}
     session = make_session()
     submitted = submit_generation(session, args)
     result = wait_for_job(session, submitted["request_id"], args.timeout)
     if result.get("status") != "completed":
-        return compact_status(result)
+        return {**compact_status(result), **choices}
     job = load_history().get(result["request_id"], {})
     files = fetch_outputs(session, result, job, args.out)
     refresh_gallery(args.open)
-    return {"request_id": result["request_id"], "status": "completed", "files": files, "usd": submitted["usd"]}
+    return {
+        "request_id": result["request_id"],
+        "status": "completed",
+        "files": files,
+        "usd": submitted["usd"],
+        **choices,
+    }
+
+
+def run_variants(args: argparse.Namespace) -> dict:
+    """hf run --variants: several variants of one template, in parallel like a batch."""
+    expanded = expand_prompt(args, args.variants)
+    session = make_session()
+    jobs = [prepare_job(session, single) for single in expanded]
+    # --max-usd is the limit for all variants together; HF_MAX_USD still applies to each one.
+    check_many_budget(jobs, args.max_usd)
+    entries = run_many(session, jobs, args.timeout, args.out)
+    for single, entry in zip(expanded, entries, strict=True):
+        entry["choices"] = single.choices
+    refresh_gallery(args.open)
+    return {"jobs": entries, **summarize_many(entries)}
 
 
 def total_cost(jobs: list[dict]) -> dict:
@@ -1149,7 +1229,8 @@ def read_batch_file(path: Path, default_model: str | None) -> list[argparse.Name
             raise CliError(f"Line {line_number}: not valid JSON ({error.msg}).") from error
         if not isinstance(data, dict):
             raise CliError(f"Line {line_number}: expected a JSON object {{...}}.")
-        jobs.append(batch_job_args(data, default_model, line_number))
+        # A line with {a|b} placeholders gets one random variant.
+        jobs.extend(expand_prompt(batch_job_args(data, default_model, line_number)))
     if not jobs:
         raise CliError(f"{path.name} contains no jobs.")
     return jobs
@@ -1556,6 +1637,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="start from the last frame of a video (file or request_id), needs ffmpeg",
     )
     generation.add_argument(
+        "--variant-seed",
+        type=int,
+        metavar="N",
+        help="repeatable choice for {a|b} placeholders in the prompt (same N, same variant)",
+    )
+    generation.add_argument(
         "--param",
         action="append",
         default=[],
@@ -1572,7 +1659,16 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"do not submit if the estimate is higher (default: ${MAX_USD_ENV} if set)",
     )
 
-    p = sub.add_parser("estimate", parents=[common, generation], help="estimate the cost up front")
+    # Several variants of a prompt with {a|b} placeholders (estimate, run).
+    several = argparse.ArgumentParser(add_help=False)
+    several.add_argument(
+        "--variants",
+        type=variants_count,
+        metavar="N|all",
+        help="N different variants of the {a|b} placeholders, or all of them (--max-usd = total)",
+    )
+
+    p = sub.add_parser("estimate", parents=[common, generation, several], help="estimate the cost up front")
     p.set_defaults(func=cmd_estimate)
 
     p = sub.add_parser("submit", parents=[common, generation, budget], help="submit a job")
@@ -1605,7 +1701,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("request_id")
     p.set_defaults(func=cmd_download)
 
-    p = sub.add_parser("run", parents=[common, generation, budget, results], help="submit + wait + download")
+    p = sub.add_parser("run", parents=[common, generation, several, budget, results], help="submit + wait + download")
     p.add_argument("--timeout", type=int, default=600)
     p.set_defaults(func=cmd_run)
 
