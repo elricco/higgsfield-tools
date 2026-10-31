@@ -1190,3 +1190,52 @@ def test_download_outputs_with_unknown_model(tmp_path, monkeypatch):
     result = {"request_id": "r1", "images": [{"url": "https://cdn/x.png"}]}
     (path,) = hf.download_outputs(result, {"model": None}, tmp_path)
     assert path.name == f"{date.today():%Y-%m-%d}_unknown_r1.png"
+
+
+class FlakyGetSession:
+    """A session whose get() fails a given number of times before it delivers."""
+
+    def __init__(self, failures: int, body: bytes = b"DATA"):
+        self.failures = failures
+        self.body = body
+        self.calls = 0
+
+    def get(self, url, stream=False, timeout=None):
+        self.calls += 1
+        if self.calls <= self.failures:
+            raise requests.ConnectionError("network down")
+        return FlakyResponse(self.body)
+
+
+class FlakyResponse:
+    status_code = 200
+
+    def __init__(self, body: bytes):
+        self.body = body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def iter_content(self, chunk_size):
+        yield self.body[:2]
+        yield self.body[2:]
+
+
+def test_download_server_file_retries(sleeps, tmp_path, monkeypatch):
+    monkeypatch.setenv("HF_SERVER", "http://hf.test")
+    monkeypatch.setenv("HF_SERVER_TOKEN", "t")
+    session = FlakyGetSession(failures=2)
+    hf.download_server_file(session, "2026-10-31/x.png", tmp_path / "x.png")
+    assert (tmp_path / "x.png").read_bytes() == b"DATA"
+    assert session.calls == 3
+
+
+def test_download_server_file_leaves_no_partial_file(sleeps, tmp_path, monkeypatch):
+    monkeypatch.setenv("HF_SERVER", "http://hf.test")
+    monkeypatch.setenv("HF_SERVER_TOKEN", "t")
+    with pytest.raises(hf.CliError, match="Download from the server failed"):
+        hf.download_server_file(FlakyGetSession(failures=99), "2026-10-31/x.png", tmp_path / "x.png")
+    assert list(tmp_path.iterdir()) == []

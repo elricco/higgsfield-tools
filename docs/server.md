@@ -53,7 +53,8 @@ Locally, `.env` in the repository is read as well; variables already set in the 
 
 - **Webhooks on** = `HF_PUBLIC_URL` **and** `HF_WEBHOOK_SECRET` are set. Every job is submitted with
   `hf_webhook=<HF_PUBLIC_URL>/webhooks/higgsfield`. Deliveries are checked with the Standard Webhooks signature
-  (HMAC-SHA256, at most 5 minutes old); unsigned or wrongly signed requests get `400`. Repeated deliveries
+  (HMAC-SHA256, at most 5 minutes old); unsigned or wrongly signed requests – and signed ones without
+`request_id`/`status` – get `400`. Repeated deliveries
   (Higgsfield retries for up to 2 hours) are recognized by their `webhook-id` and handled once.
   Polling stays on as a safety net for jobs open longer than `HF_FALLBACK_POLL_SECONDS`.
 - **Webhooks off** (neither set): the server polls every open job about every 5 seconds. Nothing has to be public.
@@ -91,8 +92,9 @@ docker compose -f deploy/compose.yaml up -d
 docker compose -f deploy/compose.yaml logs -f
 ```
 
-The example publishes the API only on `127.0.0.1:8080` and the webhook on port `8081`. Put an HTTPS reverse
-proxy (or a tunnel) in front of 8081 if you want webhooks.
+The example publishes the API on `127.0.0.1:8080` and the webhook on `127.0.0.1:8081` – both only on this
+machine. For webhooks, an HTTPS reverse proxy or a tunnel on the same machine forwards to port 8081. If the proxy
+runs elsewhere, publish `8081:8081` instead (the webhook only accepts signed deliveries either way).
 
 A client on the same machine:
 
@@ -177,7 +179,8 @@ What does **not** work in client mode yet: `hf gallery` (planned as a page of th
 Request bodies are limited to 1 MB and slow clients are disconnected after 30 seconds (this also protects the
 public webhook port).
 
-Everything the server knows lives in `HF_DATA_DIR`: `hf.db` (job log, webhook IDs, characters) and `files/`.
+Everything the server knows lives in `HF_DATA_DIR`: `hf.db` (job log, webhook IDs of the last 7 days,
+characters) and `files/`.
 Back up that one volume (for example with Velero on Kubernetes, or a volume backup with Docker).
 Higgsfield deletes its copies after 7 days – the server's copy is the one that lasts.
 

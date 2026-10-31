@@ -552,3 +552,50 @@ def test_file_path_traversal_is_404(start_server, path):
     assert response.status == 404
     assert b"SQLite" not in response.read()
     connection.close()
+
+
+# --- Follow-ups from the review ---------------------------------------------
+
+
+def test_jobs_list_since(start_server):
+    app, _ = start_server()
+    app.store.upsert_job("old", status="completed", submitted="2026-10-29T10:00:00")
+    app.store.upsert_job("new", status="completed", submitted="2026-10-31T10:00:00")
+    app.store.upsert_job("undated", status="completed")
+    data = requests.get(url(app, "/v1/jobs?since=2026-10-30"), headers=AUTH, timeout=5).json()
+    assert [job["request_id"] for job in data["jobs"]] == ["new"]
+    bad = requests.get(url(app, "/v1/jobs?since=yesterday"), headers=AUTH, timeout=5)
+    assert bad.status_code == 400
+
+
+@pytest.mark.parametrize("event", [{"status": "completed", "payload": None}, ["not", "an", "object"]])
+def test_signed_but_malformed_webhook_is_400(start_server, event):
+    app, _ = start_server(**WEBHOOKS_ON)
+    response = send_webhook(app, event)
+    assert response.status_code == 400
+    assert app.store.list_jobs() == []
+
+
+@pytest.mark.parametrize("path", ["/a/b%3Fhf_webhook=https://evil.example", "/a/b%23frag"])
+def test_model_id_with_query_characters_is_refused(start_server, path):
+    app, fake = start_server([FakeResponse(200, {"usd": "0.004"})])
+    response = requests.post(url(app, path), json={"prompt": "x"}, headers=AUTH, timeout=5)
+    assert response.status_code == 400
+    assert fake.calls == []
+
+
+def test_files_are_streamed_not_read_at_once(start_server, monkeypatch):
+    app, _ = start_server()
+    folder = app.files_dir / "2026-10-31"
+    folder.mkdir(parents=True)
+    video = folder / "clip.mp4"
+    video.write_bytes(b"x" * 3_000_000)
+
+    def no_read_bytes(self):
+        raise AssertionError("whole file read into memory")
+
+    monkeypatch.setattr(Path, "read_bytes", no_read_bytes)
+    response = requests.get(url(app, "/v1/files/2026-10-31/clip.mp4"), headers=AUTH, timeout=5)
+    assert response.status_code == 200
+    assert response.headers["Content-Type"] == "video/mp4"
+    assert len(response.content) == 3_000_000

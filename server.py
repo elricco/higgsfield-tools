@@ -9,12 +9,13 @@ import hmac
 import importlib.metadata
 import json
 import mimetypes
+import shutil
 import signal
 import threading
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlsplit
@@ -532,6 +533,10 @@ def make_handler(app: HfServer, webhook_only: bool, allow_webhook: bool) -> type
             )
 
         def on_generation(self, model: str) -> None:
+            # The path was URL-decoded: "%3F" became "?". Such characters never belong to a model ID
+            # and would smuggle extra query parameters (e.g. another hf_webhook) to Higgsfield.
+            if "?" in model or "#" in model:
+                raise HttpError(400, f"Invalid model ID: {model}")
             body = self.body_json()
             key = self.headers.get("Idempotency-Key")
             if not key:
@@ -636,6 +641,10 @@ def make_handler(app: HfServer, webhook_only: bool, allow_webhook: bool) -> type
             except (webhooks.WebhookError, json.JSONDecodeError) as error:
                 log_event("webhook_rejected", reason=str(error))
                 raise HttpError(400, "Webhook rejected.") from error
+            # Correctly signed, but not what Higgsfield documents: refuse instead of storing garbage.
+            if not isinstance(event, dict) or not event.get("request_id") or not event.get("status"):
+                log_event("webhook_rejected", reason="missing request_id or status")
+                raise HttpError(400, "Webhook rejected: missing request_id or status.")
             status = webhooks.envelope_to_status(event)
             app.store.upsert_job(
                 status["request_id"],
@@ -644,7 +653,7 @@ def make_handler(app: HfServer, webhook_only: bool, allow_webhook: bool) -> type
                 expires_at=status["expires_at"],
                 result=status,
             )
-            first_time = app.store.remember_webhook(self.headers["webhook-id"])
+            first_time = app.store.remember_webhook(self.headers["webhook-id"], now=app.clock())
             log_event(
                 "webhook_accepted", request_id=status["request_id"], status=status["status"], duplicate=not first_time
             )
@@ -663,7 +672,19 @@ def make_handler(app: HfServer, webhook_only: bool, allow_webhook: bool) -> type
 
         def on_jobs(self) -> None:
             status = self.query.get("status")
-            jobs = [job_record(job) for job in app.store.list_jobs() if not status or job["status"] == status]
+            since = self.query.get("since")
+            if since:
+                try:
+                    date.fromisoformat(since)
+                except ValueError as error:
+                    raise HttpError(400, "since must be a date like 2026-10-31.") from error
+            jobs = [
+                job_record(job)
+                for job in app.store.list_jobs()
+                if (not status or job["status"] == status)
+                # ISO dates compare correctly as text; jobs without a date are left out when filtering.
+                and (not since or (job["submitted"] or "")[:10] >= since)
+            ]
             self.send_json(200, {"jobs": jobs})
 
         def on_file(self, rel: str) -> None:
@@ -672,12 +693,13 @@ def make_handler(app: HfServer, webhook_only: bool, allow_webhook: bool) -> type
             # is_relative_to: the resolved path must still be inside files/ (no "../" escapes).
             if not target.is_relative_to(base) or not target.is_file():
                 raise HttpError(404, "Not found.")
-            data = target.read_bytes()
             self.send_response(200)
             self.send_header("Content-Type", mimetypes.guess_type(target.name)[0] or "application/octet-stream")
-            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Content-Length", str(target.stat().st_size))
             self.end_headers()
-            self.wfile.write(data)
+            # Copy in 1 MB pieces: a large video never has to fit into memory at once.
+            with target.open("rb") as file:
+                shutil.copyfileobj(file, self.wfile, 1024 * 1024)
 
         def on_spend(self) -> None:
             try:

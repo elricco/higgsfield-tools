@@ -794,14 +794,32 @@ def wait_for_job(session: requests.Session, request_id: str, timeout: int) -> di
 
 
 def download_server_file(session: requests.Session, rel: str, target: Path) -> None:
-    """Downloads one stored file from the hf server (with the server token)."""
+    """Downloads one stored file from the hf server (with the server token).
+
+    Writes to "<name>.part" first and renames it at the end, so a broken download never
+    leaves a half file behind that looks complete.
+    """
     url = f"{api_base_url()}/v1/files/{quote(rel)}"
-    with session.get(url, stream=True, timeout=HTTP_TIMEOUT) as response:
-        if response.status_code >= 400:
-            raise CliError(f"Download from the server failed: HTTP {response.status_code}")
-        with target.open("wb") as file:
-            for chunk in response.iter_content(chunk_size=1024 * 1024):
-                file.write(chunk)
+    partial = target.with_name(target.name + ".part")
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        try:
+            with session.get(url, stream=True, timeout=HTTP_TIMEOUT) as response:
+                if response.status_code in RETRY_STATUS_CODES and attempt < MAX_ATTEMPTS:
+                    time.sleep(retry_delay(attempt))
+                    continue
+                if response.status_code >= 400:
+                    raise CliError(f"Download from the server failed: HTTP {response.status_code}")
+                with partial.open("wb") as file:
+                    for chunk in response.iter_content(chunk_size=1024 * 1024):
+                        file.write(chunk)
+            # replace() renames in one step: the target is either complete or not there at all.
+            partial.replace(target)
+            return
+        except requests.RequestException as error:
+            partial.unlink(missing_ok=True)
+            if attempt == MAX_ATTEMPTS:
+                raise CliError(f"Download from the server failed: {type(error).__name__}") from error
+            time.sleep(retry_delay(attempt))
 
 
 def fetch_outputs(session: requests.Session, result: dict, job: dict, out_dir: Path) -> list[str]:

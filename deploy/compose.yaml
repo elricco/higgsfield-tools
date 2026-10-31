@@ -12,7 +12,9 @@ services:
       HF_WEBHOOK_LISTEN: 0.0.0.0:8081
     ports:
       - "127.0.0.1:8080:8080" # API for your agents – not public
-      - "8081:8081" # webhook – put an HTTPS reverse proxy or tunnel in front of it
+      # Webhook – for an HTTPS reverse proxy or tunnel on this machine. If the proxy runs elsewhere,
+      # use "8081:8081" instead (the webhook only accepts signed deliveries either way).
+      - "127.0.0.1:8081:8081"
     volumes:
       - hf-data:/data
     restart: unless-stopped

@@ -19,6 +19,7 @@ USER hf
 # 8080: API for agents (keep internal). 8081: webhook only, if HF_WEBHOOK_LISTEN=0.0.0.0:8081.
 EXPOSE 8080 8081
 VOLUME ["/data"]
+# Checks the port from HF_LISTEN (default 8080), so the health check follows a changed port.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=4)"
+    CMD python -c "import os, urllib.request; port = os.environ.get('HF_LISTEN', '0.0.0.0:8080').rpartition(':')[2]; urllib.request.urlopen(f'http://127.0.0.1:{port}/healthz', timeout=4)"
 CMD ["hf", "serve"]

@@ -120,3 +120,26 @@ def test_old_database_gets_new_columns(tmp_path):
     old.close()
     store = JobStore(path)
     assert store.upsert_job("r1", download_attempts=1)["download_attempts"] == 1
+
+
+def test_old_webhook_ids_are_forgotten(store):
+    week = 7 * 24 * 3600
+    assert store.remember_webhook("old", now=1000.0) is True
+    assert store.remember_webhook("old", now=1000.0 + 60) is False  # a retry within the window is a duplicate
+    store.remember_webhook("new", now=1000.0 + week + 1)  # inserting prunes IDs older than the keep window
+    count = store._db.execute("SELECT COUNT(*) FROM webhook_events").fetchone()[0]
+    assert count == 1
+
+
+def test_old_webhook_table_gets_received_column(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "hf.db"
+    old = sqlite3.connect(path)
+    old.execute("CREATE TABLE webhook_events (webhook_id TEXT PRIMARY KEY)")
+    old.execute("INSERT INTO webhook_events (webhook_id) VALUES ('m1')")
+    old.commit()
+    old.close()
+    store = JobStore(path)
+    assert store.remember_webhook("m1", now=5.0) is False
+    assert store.remember_webhook("m2", now=5.0) is True

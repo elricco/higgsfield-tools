@@ -7,6 +7,7 @@ write at the same time. A JSON file is not safe for that, SQLite is.
 import json
 import sqlite3
 import threading
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -35,13 +36,16 @@ JOB_COLUMNS = {
 }
 JOB_FIELDS = tuple(JOB_COLUMNS)
 JSON_FIELDS = {"payload", "result", "files"}
+# Webhook IDs are kept this long for spotting repeated deliveries (Higgsfield retries for up to 2 hours).
+WEBHOOK_ID_KEEP_SECONDS = 7 * 24 * 3600
 # Fields that describe the state at Higgsfield. Once a job is finished, older states must not overwrite them.
 STATUS_FIELDS = ("status", "result", "error", "expires_at")
 
 SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS jobs ({", ".join(f"{name} {kind}" for name, kind in JOB_COLUMNS.items())});
 CREATE TABLE IF NOT EXISTS webhook_events (
-    webhook_id TEXT PRIMARY KEY
+    webhook_id TEXT PRIMARY KEY,
+    received REAL
 );
 CREATE TABLE IF NOT EXISTS characters (
     name TEXT PRIMARY KEY COLLATE NOCASE,
@@ -81,6 +85,11 @@ class JobStore:
                 self._db.execute(f"ALTER TABLE jobs ADD COLUMN {name} {plain}")
                 if "UNIQUE" in kind:
                     self._db.execute(f"CREATE UNIQUE INDEX IF NOT EXISTS jobs_{name} ON jobs ({name})")
+        webhook_columns = {row["name"] for row in self._db.execute("PRAGMA table_info(webhook_events)")}
+        if "received" not in webhook_columns:
+            self._db.execute("ALTER TABLE webhook_events ADD COLUMN received REAL")
+            # Old IDs without a time count as "received now", so they are pruned a week from now.
+            self._db.execute("UPDATE webhook_events SET received = ?", (time.time(),))
 
     # --- Jobs ---------------------------------------------------------------
 
@@ -172,10 +181,14 @@ class JobStore:
 
     # --- Webhooks -----------------------------------------------------------
 
-    def remember_webhook(self, webhook_id: str) -> bool:
-        """True the first time an ID is seen, False for every repetition."""
+    def remember_webhook(self, webhook_id: str, now: float | None = None) -> bool:
+        """True the first time an ID is seen, False for every repetition. Forgets IDs older than a week."""
+        now = time.time() if now is None else now
         with self._lock:
-            cursor = self._db.execute("INSERT OR IGNORE INTO webhook_events (webhook_id) VALUES (?)", (webhook_id,))
+            cursor = self._db.execute(
+                "INSERT OR IGNORE INTO webhook_events (webhook_id, received) VALUES (?, ?)", (webhook_id, now)
+            )
+            self._db.execute("DELETE FROM webhook_events WHERE received < ?", (now - WEBHOOK_ID_KEEP_SECONDS,))
             self._db.commit()
         # rowcount is 0 if the row already existed and nothing was inserted.
         return cursor.rowcount == 1

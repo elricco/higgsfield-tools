@@ -43,6 +43,16 @@ jobs:
           test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/v1/status)" = 401
           docker logs hf
           docker rm -f hf
+      - name: Health check follows HF_LISTEN
+        run: |
+          docker run -d --name hf2 -e HF_API_KEY=x -e HF_API_SECRET=y -e HF_SERVER_TOKEN=t \
+            -e HF_LISTEN=0.0.0.0:9090 --health-interval=2s --health-start-period=1s hf-test
+          for i in $(seq 1 30); do
+            [ "$(docker inspect -f '{{.State.Health.Status}}' hf2)" = healthy ] && break
+            sleep 1
+          done
+          docker inspect -f '{{.State.Health.Status}}' hf2 | grep -qx healthy
+          docker rm -f hf2
       - name: Validate Kubernetes examples
         run: |
           docker run --rm -v "$PWD/deploy/kubernetes:/manifests:ro" ghcr.io/yannh/kubeconform:v0.8.0 \
