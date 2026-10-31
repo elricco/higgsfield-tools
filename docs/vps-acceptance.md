@@ -22,7 +22,8 @@ Paid steps are marked 💲 – confirm the estimate first.
 
 ## Agents
 
-- [ ] The agent container has `hf` (`hf --help`), `HF_SERVER` and `HF_SERVER_TOKEN`.
+- [ ] The agent container has `hf` (`hf --help`), `HF_SERVER` and `HF_SERVER_TOKEN`; `ffmpeg -version` works if
+      agents should join clips (`hf concat`, `--from-last-frame`).
 - [ ] `hf doctor` in the agent container → `"mode": "client"`, `"server": "ok"`, `"webhooks": "on"`.
 - [ ] `hf character list` shows the known characters (add them once with `hf character add <name> <id>`).
 - [ ] The agent has the skill text (`SKILL.md`, `reference.md`).

@@ -162,6 +162,9 @@ RUN git clone --depth 1 --branch v0.3.0 https://github.com/elricco/higgsfield-to
  && ln -s /opt/higgsfield-tools/.venv/bin/hf /usr/local/bin/hf
 ```
 
+- Optional: `ffmpeg` in the agent container (e.g. `apt-get install -y --no-install-recommends ffmpeg`) for
+  `hf concat` and `--from-last-frame`. Both run where the CLI runs, on files fetched from the server, so the
+  server image itself does not need ffmpeg.
 - Environment: `HF_SERVER=http://hf.<namespace>.svc.cluster.local:8080` and `HF_SERVER_TOKEN` (from a Secret).
 - Label the agent pod `hf-client: "true"` if you use the example NetworkPolicy.
 - Skill: `.claude/skills/higgsfield/SKILL.md` (and `reference.md`) is plain Markdown. Claude Code loads it as a
